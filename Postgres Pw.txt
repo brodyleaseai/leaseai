@@ -1,0 +1,15 @@
+Postgres Supabase Pw;
+
+na5cX9UDY1aMwOfF
+
+Supabase URL;
+
+https://nttwaqptwfwchedsqqem.supabase.co
+
+Supabase Anon Keys;
+
+sb_publishable_CJiJlTCv0xjyxigWPAUHkg_9fsnrciy
+
+Test Client ID;
+
+f75575a8-06ff-4c3a-994a-51f3ac679c57

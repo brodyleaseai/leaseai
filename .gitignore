@@ -1,0 +1,8 @@
+config.py
+.env
+__pycache__/
+*.pyc
+*.pdf
+.streamlit/secrets.toml
+.DS_Store
+Thumbs.db
