@@ -1,4 +1,15 @@
+# Core Dependencies
 streamlit>=1.64.0
 supabase>=2.0.0
 openai>=1.0.0
+python-dotenv>=1.0.0
+
+# PDF Processing
+PyPDF2>=3.0.0
 pdfplumber>=0.10.0
+
+# OCR Dependencies (for scanned PDFs)
+boto3>=1.34.0                # AWS Textract SDK
+pdf2image>=1.17.0            # PDF to image conversion
+pillow>=10.0.0               # Image processing
+pytesseract>=0.3.10          # Tesseract OCR wrapper
