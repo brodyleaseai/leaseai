@@ -1,4 +1,4 @@
-"""
+﻿"""
 Test Full 84-Field Extraction (No Database)
 Extracts all lease fields using GPT-4 without saving to Supabase
 """

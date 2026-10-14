@@ -1,0 +1,506 @@
+{
+  "Landlord Legal Name": {
+    "value": "City of Langford",
+    "confidence": "HIGH",
+    "source_snippet": "Name of Landlord: City of Langford",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Landlord Registered Address": {
+    "value": "877 Goldstream Avenue, 2nd Floor, Victoria, B.C., V9B 2X8",
+    "confidence": "HIGH",
+    "source_snippet": "Address of Landlord: 877 Goldstream Avenue, 2nd Floor, Victoria, B.C., V9B 2X8",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Landlord Contact / Notice Address": {
+    "value": "877 Goldstream Avenue, 2nd Floor, Victoria, B.C., V9B 2X8",
+    "confidence": "HIGH",
+    "source_snippet": "Address of Landlord: 877 Goldstream Avenue, 2nd Floor, Victoria, B.C., V9B 2X8",
+    "notes": "Same as registered address, used for notices as per lease."
+  },
+  "Tenant Legal Name": {
+    "value": "1392180 BC Ltd.",
+    "confidence": "HIGH",
+    "source_snippet": "Name of Tenant: 1392180 BC Ltd.",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Tenant Trade Name (if different)": {
+    "value": "Rhino Coffee House",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant\u2019s Trade Name: Rhino Coffee House",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Tenant Registered Address": {
+    "value": "111-2840 Peatt Road, Langford, BC, V9B 3V5",
+    "confidence": "HIGH",
+    "source_snippet": "Address of Tenant: 111-2840 Peatt Road, Langford, BC, V9B 3V5",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Guarantor Name(s)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No guarantor information found in the document."
+  },
+  "Property Civic Address": {
+    "value": "Jordie Lunn Bike Park, 2990 Irwin Road, Langford, B.C., V9B 5Y6",
+    "confidence": "HIGH",
+    "source_snippet": "civic address known as Jordie Lunn Bike Park, 2990 Irwin Road, Langford, B.C., V9B 5Y6",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Property Legal Description": {
+    "value": "LOT D SECTION 26 GOLDSTREAM DISTRICT PLAN VIP 70452 EXCEPT PLAN EPP 127942",
+    "confidence": "HIGH",
+    "source_snippet": "Legal Description: LOT D SECTION 26 GOLDSTREAM DISTRICT PLAN VIP 70452 EXCEPT PLAN EPP 127942",
+    "notes": "Explicitly stated in the lease definitions."
+  },
+  "Premises Square Footage (RSF)": {
+    "value": "1,154 square feet",
+    "confidence": "HIGH",
+    "source_snippet": "Rentable Area Approximately 1,154 square feet",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Building Total Square Footage": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Total building square footage not specified in the document."
+  },
+  "Floor(s) Occupied": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Floor information not specified in the document."
+  },
+  "Suite / Unit Number": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Suite or unit number not specified in the document."
+  },
+  "Building Class": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Building class not specified in the document."
+  },
+  "Lease Type (Gross / Net / Modified Gross)": {
+    "value": "Net",
+    "confidence": "HIGH",
+    "source_snippet": "intended that this Lease will be a completely carefree net lease",
+    "notes": "Explicitly stated as a net lease."
+  },
+  "Net Lease Type (Single / Double / Triple)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Specific net lease type not specified in the document."
+  },
+  "Lease Commencement Date": {
+    "value": "2024-04-01",
+    "confidence": "HIGH",
+    "source_snippet": "Term Commencement Date April 1, 2024.",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Rent Commencement Date": {
+    "value": "2024-04-01",
+    "confidence": "HIGH",
+    "source_snippet": "payment of Rent will begin on the Term Commencement Date",
+    "notes": "Rent begins on the Term Commencement Date."
+  },
+  "Lease Expiration Date": {
+    "value": "2027-03-31",
+    "confidence": "HIGH",
+    "source_snippet": "The Term of this Lease shall be for the initial term of three (3) years",
+    "notes": "Calculated based on a 3-year term from commencement."
+  },
+  "Lease Term (Total Months)": {
+    "value": "36 months",
+    "confidence": "HIGH",
+    "source_snippet": "The Term of this Lease shall be for the initial term of three (3) years",
+    "notes": "Explicitly stated as 3 years."
+  },
+  "Base Rent Year 1 (monthly)": {
+    "value": "$1,923.33",
+    "confidence": "HIGH",
+    "source_snippet": "monthly payments of $1,923.33",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Base Rent Year 2 (monthly)": {
+    "value": "$1,923.33",
+    "confidence": "HIGH",
+    "source_snippet": "monthly payments of $1,923.33",
+    "notes": "No escalation mentioned, assumed same as Year 1."
+  },
+  "Base Rent Year 3 (monthly)": {
+    "value": "$1,923.33",
+    "confidence": "HIGH",
+    "source_snippet": "monthly payments of $1,923.33",
+    "notes": "No escalation mentioned, assumed same as Year 1."
+  },
+  "Base Rent Year 4 (monthly)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Lease term is only 3 years, no Year 4 rent specified."
+  },
+  "Base Rent Year 5 (monthly)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "Lease term is only 3 years, no Year 5 rent specified."
+  },
+  "Full Rent Schedule (all years)": {
+    "value": "Year 1-3: $1,923.33 per month",
+    "confidence": "HIGH",
+    "source_snippet": "monthly payments of $1,923.33",
+    "notes": "No escalation mentioned, same rent for all 3 years."
+  },
+  "Free Rent Period (months)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No free rent period mentioned in the document."
+  },
+  "Annual Escalation Type (Fixed / CPI / Percentage)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No escalation type mentioned in the document."
+  },
+  "Annual Escalation Rate or Cap": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No escalation rate or cap mentioned in the document."
+  },
+  "CPI Index Used (if applicable)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No CPI index mentioned in the document."
+  },
+  "Percentage Rent Clause": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No percentage rent clause mentioned in the document."
+  },
+  "Gross Revenue Breakpoint (if percentage rent)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No percentage rent clause, hence no breakpoint."
+  },
+  "Base Year for Operating Expenses": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No base year for operating expenses mentioned."
+  },
+  "Operating Expense Stop Amount": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No operating expense stop amount mentioned."
+  },
+  "CAM / Operating Cost Charges": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No CAM or operating cost charges mentioned."
+  },
+  "CAM Annual Increase Cap (%)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No CAM increase cap mentioned."
+  },
+  "CAM Exclusions": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No CAM exclusions mentioned."
+  },
+  "Property Tax Responsibility": {
+    "value": "Tenant",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will pay for its electricity, gas, other fuel, telephone, water, and other similar utilities",
+    "notes": "Tenant responsible for taxes related to their business."
+  },
+  "Property Insurance Responsibility": {
+    "value": "Landlord",
+    "confidence": "HIGH",
+    "source_snippet": "Landlord will not be responsible during the Term for any costs, charges, expenses, and outlays",
+    "notes": "Landlord responsible for building insurance."
+  },
+  "Tenant Insurance Requirements": {
+    "value": "Tenant to maintain all risks and liability insurance",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant to Insure The Tenant covenants with the Landlord that it will, at the Tenant\u2019s cost and expense, take out and keep in force the insurance described below",
+    "notes": "Tenant must maintain specified insurance coverage."
+  },
+  "Tenant Liability Insurance Minimum": {
+    "value": "$5,000,000 per occurrence",
+    "confidence": "HIGH",
+    "source_snippet": "commercial general liability insurance with inclusive limits of at least $5,000,000 per occurrence",
+    "notes": "Explicitly stated in the insurance section."
+  },
+  "Utilities Responsibility": {
+    "value": "Tenant",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will pay for those costs that directly relate to the Tenant\u2019s use of the Premises, which include the cost, charge, or expense for utilities",
+    "notes": "Tenant responsible for utilities."
+  },
+  "HVAC Responsibility (Landlord / Tenant)": {
+    "value": "Landlord",
+    "confidence": "HIGH",
+    "source_snippet": "To maintain and operate the HVAC System",
+    "notes": "Landlord responsible for HVAC maintenance."
+  },
+  "HVAC Maintenance Obligation": {
+    "value": "Landlord to maintain and operate the HVAC System",
+    "confidence": "HIGH",
+    "source_snippet": "To maintain and operate the HVAC System",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Janitorial Responsibility": {
+    "value": "Tenant",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will keep the Premises in a clean, tidy, and sanitary condition",
+    "notes": "Tenant responsible for janitorial services."
+  },
+  "Structural / Roof Repair Responsibility": {
+    "value": "Landlord",
+    "confidence": "HIGH",
+    "source_snippet": "To maintain and repair at its own expense the structure of the foundations, sub-floors, and outer walls",
+    "notes": "Landlord responsible for structural repairs."
+  },
+  "Number of Renewal Options": {
+    "value": "2",
+    "confidence": "HIGH",
+    "source_snippet": "The lease may be renewed twice for a total of 13 years including the original Term.",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Renewal Option Term Length": {
+    "value": "5 years",
+    "confidence": "HIGH",
+    "source_snippet": "grant to the Tenant at the Tenant\u2019s expense one renewal of the Premises for the renewal term of 5 years",
+    "notes": "Each renewal term is 5 years."
+  },
+  "Renewal Notice Deadline": {
+    "value": "6 months prior to expiration",
+    "confidence": "HIGH",
+    "source_snippet": "notice to be given not later than 6 months prior to the expiration of the initial Term",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Renewal Rent Basis (FMV / Fixed / CPI)": {
+    "value": "FMV",
+    "confidence": "HIGH",
+    "source_snippet": "the then fair market rental value of the Premises as at the commencement of the Renewal Term",
+    "notes": "Renewal rent based on fair market value."
+  },
+  "Right of First Refusal": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No right of first refusal mentioned."
+  },
+  "Right of First Offer": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No right of first offer mentioned."
+  },
+  "Expansion Option": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No expansion option mentioned."
+  },
+  "Contraction / Reduction Option": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No contraction or reduction option mentioned."
+  },
+  "Early Termination Right": {
+    "value": "Tenant may terminate if gross sales fall below threshold for two consecutive quarters",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant reserves the right to terminate this Lease upon providing 90 days written notice",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Termination Notice Period": {
+    "value": "90 days",
+    "confidence": "HIGH",
+    "source_snippet": "upon providing 90 days written notice to the Landlord",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Early Termination Fee / Penalty": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No early termination fee or penalty mentioned."
+  },
+  "Permitted Use": {
+    "value": "Coffee shop under the name and style of Rhino Coffee",
+    "confidence": "HIGH",
+    "source_snippet": "Permitted Use Coffee shop under the name and style of Rhino Coffee",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Prohibited Uses / Exclusivity Clause": {
+    "value": "No auction sale, distress sale, bankruptcy sale, going out of business sale, bulk sale",
+    "confidence": "HIGH",
+    "source_snippet": "will not conduct on the Premises an auction sale, nor any \u201cdistress sale\u201d, \u201cbankruptcy sale\u201d, \u201cgoing out of business sale\u201d, \u201cbulk sale\u201d",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Subletting / Assignment Rights": {
+    "value": "Tenant will not enter into a Transfer of this Lease in whole or in part, nor part with possession of all or any part of the Premises, without the prior written consent of the Landlord",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will not enter into a Transfer of this Lease in whole or in part, nor part with possession of all or any part of the Premises, without the prior written consent of the Landlord",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Subletting \u2014 Landlord Consent Required": {
+    "value": "Yes",
+    "confidence": "HIGH",
+    "source_snippet": "without the prior written consent of the Landlord",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Co-Tenancy Clause": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No co-tenancy clause mentioned."
+  },
+  "Tenant Improvement Allowance (TIA)": {
+    "value": "$75,000.00",
+    "confidence": "HIGH",
+    "source_snippet": "The Landlord will reimburse the Tenant up to $75,000.00 towards the purchase and installation of equipment",
+    "notes": "Explicitly stated in the lease."
+  },
+  "TIA Conditions / Milestones": {
+    "value": "Tenant will submit receipts to the City for all expenditures up to the allotted $75,000.00",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will submit receipts to the City for all expenditures up to the allotted $75,000.00",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Alterations \u2014 Landlord Consent Threshold": {
+    "value": "Tenant may, with the prior written consent of the Landlord, such consent not to be unreasonably withheld, at any time and from time to time at the Tenant\u2019s expense make such changes, alterations, additions, and improvements",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant may, with the prior written consent of the Landlord, such consent not to be unreasonably withheld",
+    "notes": "Explicitly stated in the lease."
+  },
+  "ADA / Accessibility Compliance Responsibility": {
+    "value": "Tenant",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will comply and cause any other person acting under its authority or control to comply with all Applicable Laws",
+    "notes": "Tenant responsible for compliance with laws."
+  },
+  "Security Deposit Amount": {
+    "value": "$1,923.33",
+    "confidence": "HIGH",
+    "source_snippet": "Security Deposit $1,923.33",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Security Deposit \u2014 Letter of Credit": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No letter of credit mentioned for security deposit."
+  },
+  "Security Deposit Reduction Schedule": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No reduction schedule mentioned for security deposit."
+  },
+  "Parking \u2014 Number of Stalls": {
+    "value": "2-3 designated 15-minute parking spaces",
+    "confidence": "HIGH",
+    "source_snippet": "2-3 designated 15-minute parking spaces at the rear of the Clubhouse",
+    "notes": "Explicitly stated in the lease summary."
+  },
+  "Parking \u2014 Monthly Cost per Stall": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No cost per stall mentioned."
+  },
+  "Storage Space Included": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No storage space information found."
+  },
+  "Signage Rights": {
+    "value": "Tenant will not erect or place, or permit to be erected or placed, or maintain any signs of any nature or kind whatsoever either on the exterior walls of the Premises or on the walls of the Clubhouse",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will not erect or place, or permit to be erected or placed, or maintain any signs",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Roof / Exterior Access Rights": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No roof or exterior access rights mentioned."
+  },
+  "Hazardous Materials Clause": {
+    "value": "Tenant will not use or permit to be used the Premises for the sale, storage, manufacture, disposal, handling, treatment, generation, use, transport, remediation or any other dealing with any Hazardous Substances without the prior written consent of the Landlord",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will not use or permit to be used the Premises for the sale, storage, manufacture, disposal, handling, treatment, generation, use, transport, remediation or any other dealing with any Hazardous Substances",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Governing Law Jurisdiction": {
+    "value": "British Columbia",
+    "confidence": "HIGH",
+    "source_snippet": "This Lease will be construed and governed by the laws of the province of British Columbia",
+    "notes": "Explicitly stated in the lease."
+  },
+  "SNDA Agreement Required": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No SNDA agreement requirement mentioned."
+  },
+  "Estoppel Certificate Obligation": {
+    "value": "Tenant will deliver, in a form supplied by the Landlord, an estoppel certificate",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will deliver, in a form supplied by the Landlord, an estoppel certificate",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Force Majeure Clause": {
+    "value": "if the Landlord or the Tenant is, in good faith, delayed or prevented from doing anything required by this Lease because of a strike, labour trouble, inability to obtain materials or services, power failure, restrictive government laws, orders, decrees, or regulations, riots, insurrection, sabotage, rebellion, war, act of God, terrorism, epidemics, pandemics, or outbreaks of communicable disease, quarantines, Health Emergencies, or other public or national or regional emergencies, or any other similar reason that is not the fault of the Party delayed, the doing of the thing is excused for the period of the delay",
+    "confidence": "HIGH",
+    "source_snippet": "if the Landlord or the Tenant is, in good faith, delayed or prevented from doing anything required by this Lease because of a strike, labour trouble, inability to obtain materials or services",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Dispute Resolution Mechanism": {
+    "value": "arbitration conducted by a single arbitrator pursuant to the Arbitration Act (British Columbia)",
+    "confidence": "HIGH",
+    "source_snippet": "determined by arbitration conducted by a single arbitrator pursuant to the Arbitration Act (British Columbia)",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Holdover Provision (rate & notice)": {
+    "value": "Tenant will be deemed to be occupying the Premises as a tenant from month to month, at a monthly rent payable in advance on the first day of each month equal to the sum of: (a) one-tenth of the Basic Rent payable during the last 12 months of the Term; and (b) one-tenth of the Additional Rent, payable hereunder during the last 12 months of the Term",
+    "confidence": "HIGH",
+    "source_snippet": "Tenant will be deemed to be occupying the Premises as a tenant from month to month, at a monthly rent payable in advance on the first day of each month equal to the sum of",
+    "notes": "Explicitly stated in the lease."
+  },
+  "Demolition / Redevelopment Clause": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No demolition or redevelopment clause mentioned."
+  },
+  "Default Cure Period (Tenant)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No specific default cure period for tenant mentioned."
+  },
+  "Default Cure Period (Landlord)": {
+    "value": "NOT FOUND",
+    "confidence": "LOW",
+    "source_snippet": "",
+    "notes": "No specific default cure period for landlord mentioned."
+  }
+}
