@@ -6,6 +6,16 @@ SECURITY: Never commit real API keys to git or share them in chat!
 Update the placeholder values below with your actual keys locally.
 """
 import os
+from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    # python-dotenv not installed, will use system environment variables only
+    pass
 
 # Supabase Configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://nttwaqptwfwchedsqqem.supabase.co")
