@@ -165,12 +165,18 @@ with tab1:
                     # Initialize ASC 842 engine
                     engine = ASC842ComplianceEngine(lease_data)
                     
-                    # Run all calculations
-                    engine.classify_lease()
-                    engine.calculate_initial_recognition()
-                    engine.generate_liability_schedule()
-                    engine.generate_rou_schedule()
-                    engine.generate_journal_entries()
+                    # Run full calculation (this does everything at once)
+                    results = engine.run_full_calculation()
+                    
+                    # Extract key values from results
+                    engine.initial_liability = results.get('initial_liability', 0)
+                    engine.initial_rou_asset = results.get('initial_rou_asset', 0)
+                    engine.lease_classification = results.get('classification', 'Operating')
+                    
+                    # Generate individual components
+                    engine.liability_schedule = engine.generate_liability_amortization_schedule()
+                    engine.rou_schedule = engine.generate_rou_asset_depreciation_schedule()
+                    engine.journal_entries = engine.generate_monthly_journal_entries()
                     
                     # Display results
                     st.success("✅ ASC 842 Compliance Calculation Complete!")

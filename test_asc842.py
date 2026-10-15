@@ -66,21 +66,27 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# Test 5: Calculate initial recognition
-print("\n5. Calculating initial recognition...")
+# Test 5: Run full calculation
+print("\n5. Running full calculation...")
 try:
-    engine.calculate_initial_recognition()
-    print(f"   ✅ Initial ROU Asset: ${engine.initial_rou_asset:,.2f}")
-    print(f"   ✅ Initial Liability: ${engine.initial_liability:,.2f}")
+    results = engine.run_full_calculation()
+    print(f"   ✅ Calculation complete")
+    print(f"   - Classification: {results.get('classification', 'N/A')}")
+    print(f"   - Initial ROU Asset: ${results.get('initial_rou_asset', 0):,.2f}")
+    print(f"   - Initial Liability: ${results.get('initial_liability', 0):,.2f}")
+    
+    engine.initial_liability = results.get('initial_liability', 0)
+    engine.initial_rou_asset = results.get('initial_rou_asset', 0)
+    engine.lease_classification = results.get('classification', 'Operating')
 except Exception as e:
-    print(f"   ❌ Initial recognition failed: {e}")
+    print(f"   ❌ Full calculation failed: {e}")
     import traceback
     traceback.print_exc()
 
 # Test 6: Generate schedules
 print("\n6. Generating amortization schedules...")
 try:
-    engine.generate_liability_schedule()
+    engine.liability_schedule = engine.generate_liability_amortization_schedule()
     if engine.liability_schedule is not None:
         print(f"   ✅ Liability schedule: {len(engine.liability_schedule)} rows")
     else:
@@ -91,7 +97,7 @@ except Exception as e:
     traceback.print_exc()
 
 try:
-    engine.generate_rou_schedule()
+    engine.rou_schedule = engine.generate_rou_asset_depreciation_schedule()
     if engine.rou_schedule is not None:
         print(f"   ✅ ROU schedule: {len(engine.rou_schedule)} rows")
     else:
@@ -104,7 +110,7 @@ except Exception as e:
 # Test 7: Generate journal entries
 print("\n7. Generating journal entries...")
 try:
-    engine.generate_journal_entries()
+    engine.journal_entries = engine.generate_monthly_journal_entries()
     print(f"   ✅ Journal entries: {len(engine.journal_entries)} entries")
 except Exception as e:
     print(f"   ❌ Journal entries failed: {e}")
