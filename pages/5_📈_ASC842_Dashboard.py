@@ -33,11 +33,9 @@ except Exception:
 
 from supabase import create_client
 from auth_module import AuthManager
-from asc842_engine import ASC842ComplianceEngine
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 auth = AuthManager(sb)
-engine = ASC842ComplianceEngine()
 
 # Check authentication
 if not st.session_state.get("authenticated", False):
