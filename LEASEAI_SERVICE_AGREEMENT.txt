@@ -1,0 +1,192 @@
+# LEASEAI SERVICE AGREEMENT
+
+**Last Updated: October 5, 2026**
+
+This Service Agreement ("Agreement") is between LeaseAI ("Provider", "we", "us") and the client ("Client", "you") who subscribes to our lease abstraction services.
+
+## 1. SERVICE DESCRIPTION
+
+**1.1 Services Provided**
+LeaseAI provides AI-powered commercial lease abstraction services including:
+- Automated extraction of lease terms and clauses
+- Professional PDF abstract generation
+- ASC 842 / IFRS 16 compliance calculations (Professional plan only)
+- Secure document storage and management
+
+**1.2 Service Levels**
+- **Pay-per-Lease**: 48-hour turnaround
+- **Starter Plan**: 24-hour turnaround, 10 leases/month
+- **Professional Plan**: 12-hour turnaround, unlimited leases
+- **Enterprise**: Custom SLA available
+
+## 2. CLIENT OBLIGATIONS
+
+**2.1 Document Quality**
+You agree to provide:
+- Complete, legible PDF documents
+- Accurate property and tenant information
+- Documents in English language
+
+**2.2 Proper Use**
+You agree to:
+- Use the service only for legitimate commercial purposes
+- Not reverse-engineer or copy our AI models
+- Maintain confidentiality of your login credentials
+- Comply with all applicable laws
+
+## 3. PRICING AND PAYMENT
+
+**3.1 Fees**
+- Subscription fees are billed monthly in advance
+- Pay-per-lease fees are charged at time of processing
+- All fees are in USD
+- Prices subject to 30-day notice for changes
+
+**3.2 Payment Terms**
+- Payment via Stripe (credit card or ACH)
+- Failed payments may result in service suspension
+- No refunds for unused subscription time
+- Enterprise plans: Net-30 invoicing available
+
+**3.3 Cancellation**
+- Cancel subscription anytime
+- Cancellation effective at end of billing period
+- No refunds for partial months
+
+## 4. DATA SECURITY & PRIVACY
+
+**4.1 Security Measures**
+We implement:
+- End-to-end encryption for data in transit and at rest
+- SOC 2 Type II compliant infrastructure
+- Regular security audits and penetration testing
+- Restricted employee access controls
+
+**4.2 Data Retention**
+- Documents stored for 7 years (default)
+- You may request deletion at any time
+- Backup copies retained for 90 days after deletion
+
+**4.3 Privacy**
+- We do not sell or share your data with third parties
+- AI processing uses OpenAI GPT-4 (subject to OpenAI's DPA)
+- See full Privacy Policy at leaseai.com/privacy
+
+## 5. INTELLECTUAL PROPERTY
+
+**5.1 Your Documents**
+- You retain all rights to your uploaded documents
+- You grant us license to process documents to provide services
+- License terminates upon document deletion
+
+**5.2 Our IP**
+- LeaseAI retains all rights to our software, AI models, and abstracts format
+- You may not copy, modify, or distribute our software
+
+## 6. ACCURACY AND LIABILITY
+
+**6.1 AI Accuracy**
+- We target 95%+ extraction accuracy
+- All extractions are reviewed by our team
+- We provide confidence scores for each field
+
+**6.2 No Legal Advice**
+- LeaseAI provides information extraction only
+- We do not provide legal, accounting, or financial advice
+- Consult qualified professionals for advice
+
+**6.3 Limitation of Liability**
+TO THE MAXIMUM EXTENT PERMITTED BY LAW:
+- OUR TOTAL LIABILITY IS LIMITED TO FEES PAID IN PRIOR 12 MONTHS
+- WE ARE NOT LIABLE FOR INDIRECT, CONSEQUENTIAL, OR PUNITIVE DAMAGES
+- WE ARE NOT LIABLE FOR ERRORS IN SOURCE DOCUMENTS
+- YOU REMAIN RESPONSIBLE FOR VERIFYING ALL EXTRACTED DATA
+
+**6.4 Indemnification**
+You agree to indemnify LeaseAI against claims arising from:
+- Your breach of this Agreement
+- Your uploaded documents
+- Your use of our abstracts
+
+## 7. CONFIDENTIALITY
+
+**7.1 Mutual Confidentiality**
+Both parties agree to:
+- Keep confidential information private
+- Use confidential information only for Agreement purposes
+- Return or destroy confidential information upon termination
+
+**7.2 Exceptions**
+Confidentiality does not apply to information that:
+- Is publicly available
+- Was known before disclosure
+- Is required by law to be disclosed
+
+## 8. TERM AND TERMINATION
+
+**8.1 Term**
+- Agreement begins when you create an account
+- Continues until terminated by either party
+
+**8.2 Termination for Cause**
+We may terminate immediately if you:
+- Breach this Agreement
+- Fail to pay fees
+- Engage in fraudulent or illegal activity
+
+**8.3 Effect of Termination**
+Upon termination:
+- Access to services ends immediately (or at period end for subscriptions)
+- You may download your documents for 30 days
+- Outstanding fees remain due
+
+## 9. GENERAL PROVISIONS
+
+**9.1 Governing Law**
+This Agreement is governed by the laws of British Columbia, Canada, without regard to conflict of law principles.
+
+**9.2 Dispute Resolution**
+- Disputes resolved through binding arbitration (BCICAC rules)
+- Arbitration in Vancouver, BC
+- Small claims court claims exempt from arbitration
+
+**9.3 Entire Agreement**
+This Agreement, together with our Privacy Policy and Terms of Service, constitutes the entire agreement between parties.
+
+**9.4 Amendments**
+We may update this Agreement with 30 days' notice. Continued use constitutes acceptance.
+
+**9.5 Assignment**
+You may not assign this Agreement. We may assign to affiliates or in connection with a merger or acquisition.
+
+**9.6 Severability**
+If any provision is unenforceable, remaining provisions remain in effect.
+
+**9.7 No Waiver**
+Failure to enforce any provision does not waive our right to enforce it later.
+
+## 10. CONTACT
+
+For questions about this Agreement:
+
+**LeaseAI**  
+Email: legal@leaseai.com  
+Phone: (604) 555-0123  
+Address: [Your Business Address]
+
+---
+
+**ACCEPTANCE**
+
+By creating an account or using LeaseAI services, you acknowledge that you have read, understood, and agree to be bound by this Service Agreement.
+
+**Client Signature**: _____________________  
+**Date**: _____________________  
+**Print Name**: _____________________  
+
+**LeaseAI Representative**: _____________________  
+**Date**: _____________________  
+
+---
+
+*For Enterprise clients, this Agreement may be superseded by a separately negotiated Master Services Agreement.*

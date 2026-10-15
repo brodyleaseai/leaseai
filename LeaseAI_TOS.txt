@@ -1,0 +1,258 @@
+# LEASEAI TERMS OF SERVICE
+
+**Effective Date: October 5, 2026**
+
+Welcome to LeaseAI! These Terms of Service ("Terms") govern your use of our website and services. By accessing or using LeaseAI, you agree to these Terms.
+
+## 1. ACCEPTANCE OF TERMS
+
+By creating an account, you:
+- Agree to these Terms and our Privacy Policy
+- Represent that you are 18+ years old
+- Represent that you have authority to bind your organization
+- Agree to receive electronic communications from us
+
+## 2. ACCOUNT REGISTRATION
+
+**2.1 Account Creation**
+- Provide accurate, current information
+- Maintain security of your password
+- Notify us immediately of unauthorized access
+- You are responsible for all activity under your account
+
+**2.2 Account Eligibility**
+- Must be 18 years or older
+- Must not have been previously banned
+- One account per email address
+
+**2.3 Account Termination**
+We may suspend or terminate accounts that:
+- Violate these Terms
+- Engage in fraudulent activity
+- Remain inactive for 12+ months
+
+## 3. SERVICES
+
+**3.1 Description**
+LeaseAI provides:
+- AI-powered lease abstraction
+- Document storage and management
+- ASC 842 compliance calculations
+- Professional PDF reports
+
+**3.2 Service Modifications**
+We may:
+- Update features and functionality
+- Perform scheduled maintenance
+- Temporarily suspend service for maintenance
+- Discontinue features with 30-days' notice
+
+**3.3 Service Availability**
+- We target 99.9% uptime (excluding maintenance)
+- We are not liable for service interruptions
+- No SLA for free trial accounts
+
+## 4. ACCEPTABLE USE
+
+**4.1 Permitted Use**
+You may use LeaseAI only for:
+- Legitimate commercial lease abstraction
+- Internal business purposes
+- Compliance with all applicable laws
+
+**4.2 Prohibited Use**
+You may NOT:
+- Upload documents you don't have rights to
+- Share account credentials
+- Reverse-engineer our software
+- Scrape or data mine our services
+- Upload malware or malicious code
+- Use for competitive analysis
+- Violate any laws or regulations
+- Harass or abuse our support team
+
+**4.3 Consequences**
+Violations may result in:
+- Account suspension or termination
+- Deletion of your data
+- Legal action
+- Reporting to authorities
+
+## 5. CONTENT AND INTELLECTUAL PROPERTY
+
+**5.1 Your Content**
+- You retain ownership of documents you upload
+- You grant us license to process documents
+- You represent you have rights to upload documents
+- You are responsible for content of your documents
+
+**5.2 Our IP**
+LeaseAI owns:
+- Website, software, and services
+- AI models and algorithms
+- Abstract templates and formats
+- Trademarks and branding
+
+**5.3 Feedback**
+Feedback you provide becomes our property and may be used without compensation.
+
+## 6. PRICING AND PAYMENT
+
+**6.1 Fees**
+- Fees as posted on our website
+- Billed monthly (subscriptions) or per-transaction
+- All fees in USD
+- Subject to applicable taxes
+
+**6.2 Payment Processing**
+- Processed via Stripe
+- You authorize recurring charges
+- Update payment method to avoid interruption
+
+**6.3 Refunds**
+- No refunds for subscription fees
+- Refunds for processing errors at our discretion
+- Contact support@leaseai.com for refund requests
+
+**6.4 Price Changes**
+- We may change prices with 30-days' notice
+- New prices apply at next billing cycle
+- Cancel before renewal to avoid new prices
+
+## 7. DATA AND PRIVACY
+
+**7.1 Data Collection**
+We collect:
+- Account information
+- Uploaded documents
+- Usage data
+- Payment information
+
+**7.2 Data Use**
+We use data to:
+- Provide services
+- Improve our AI models
+- Communicate with you
+- Comply with legal obligations
+
+**7.3 Data Security**
+We implement:
+- Encryption in transit and at rest
+- Regular security audits
+- Access controls
+- SOC 2 Type II compliance
+
+**7.4 Privacy Policy**
+See full details at leaseai.com/privacy
+
+## 8. AI AND ACCURACY
+
+**8.1 AI Processing**
+- We use OpenAI GPT-4 for extraction
+- AI may make errors or omissions
+- All extractions reviewed by our team
+- Confidence scores provided
+
+**8.2 No Warranties**
+WE DO NOT WARRANT:
+- 100% accuracy of extractions
+- Fitness for any particular purpose
+- Uninterrupted or error-free service
+- Security of data transmission
+
+**8.3 Your Responsibility**
+You are responsible for:
+- Verifying accuracy of abstracts
+- Making decisions based on abstracts
+- Obtaining professional advice
+
+## 9. DISCLAIMERS
+
+**TO THE MAXIMUM EXTENT PERMITTED BY LAW:**
+
+SERVICES ARE PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+
+WE DO NOT PROVIDE LEGAL, ACCOUNTING, OR FINANCIAL ADVICE.
+
+## 10. LIMITATION OF LIABILITY
+
+**TO THE MAXIMUM EXTENT PERMITTED BY LAW:**
+
+**10.1 Damages Cap**
+OUR TOTAL LIABILITY TO YOU IS LIMITED TO THE GREATER OF:
+- $100, OR
+- FEES PAID IN PRIOR 12 MONTHS
+
+**10.2 Excluded Damages**
+WE ARE NOT LIABLE FOR:
+- INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+- LOST PROFITS OR REVENUE
+- DATA LOSS
+- BUSINESS INTERRUPTION
+- DAMAGES ARISING FROM YOUR USE OF ABSTRACTS
+
+**10.3 Exceptions**
+Limitations do not apply to:
+- Our gross negligence or willful misconduct
+- Death or personal injury caused by us
+- Liability that cannot be excluded by law
+
+## 11. INDEMNIFICATION
+
+You agree to indemnify and hold LeaseAI harmless from claims arising from:
+- Your breach of these Terms
+- Your uploaded documents
+- Your use of our abstracts
+- Your violation of laws or third-party rights
+
+## 12. DISPUTE RESOLUTION
+
+**12.1 Informal Resolution**
+Contact legal@leaseai.com to resolve disputes informally first.
+
+**12.2 Arbitration**
+- Disputes resolved through binding arbitration
+- Arbitration in Vancouver, BC under BCICAC rules
+- You waive right to jury trial and class actions
+- Small claims court claims exempt
+
+**12.3 Governing Law**
+These Terms are governed by British Columbia law.
+
+## 13. GENERAL
+
+**13.1 Entire Agreement**
+These Terms, Privacy Policy, and Service Agreement constitute the entire agreement.
+
+**13.2 Amendments**
+We may update Terms with 30-days' notice. Continued use constitutes acceptance.
+
+**13.3 Assignment**
+You may not assign your account. We may assign to affiliates or successors.
+
+**13.4 Severability**
+Invalid provisions do not affect remaining Terms.
+
+**13.5 No Waiver**
+Failure to enforce a provision does not waive future enforcement.
+
+**13.6 Force Majeure**
+We are not liable for delays due to circumstances beyond our control.
+
+**13.7 Survival**
+Provisions that should survive termination (payment, liability, disputes) remain in effect.
+
+## 14. CONTACT
+
+For questions about these Terms:
+
+**LeaseAI**  
+Email: legal@leaseai.com  
+Phone: (604) 555-0123  
+Address: [Your Business Address]  
+
+---
+
+**By using LeaseAI, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.**
+
+Last Updated: October 5, 2026

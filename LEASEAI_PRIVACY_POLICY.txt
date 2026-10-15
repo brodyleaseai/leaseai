@@ -1,0 +1,305 @@
+# LEASEAI PRIVACY POLICY
+
+**Effective Date: October 5, 2026**
+
+At LeaseAI, we take your privacy seriously. This Privacy Policy explains how we collect, use, share, and protect your personal information.
+
+## 1. INFORMATION WE COLLECT
+
+**1.1 Information You Provide**
+
+**Account Information:**
+- Name and email address
+- Company name and phone number
+- Password (encrypted)
+
+**Document Information:**
+- Lease documents you upload
+- Property addresses
+- Tenant names
+- Notes and instructions
+
+**Payment Information:**
+- Credit card details (processed by Stripe, not stored by us)
+- Billing address
+- Transaction history
+
+**Communications:**
+- Support tickets and emails
+- Feedback and survey responses
+
+**1.2 Information We Collect Automatically**
+
+**Usage Data:**
+- Pages visited and features used
+- Time spent on platform
+- Device type and browser
+- IP address and location (city/country)
+- Referring website
+
+**Cookies and Tracking:**
+- Session cookies (required for functionality)
+- Analytics cookies (Google Analytics)
+- You can disable non-essential cookies in settings
+
+**1.3 Information from Third Parties**
+
+**AI Processing:**
+- We use OpenAI GPT-4 to extract lease data
+- OpenAI processes document text per their Data Processing Agreement
+- OpenAI does not train models on your data (per their enterprise DPA)
+
+**Payment Processing:**
+- Stripe processes payments and provides transaction data
+- See Stripe's privacy policy at stripe.com/privacy
+
+## 2. HOW WE USE YOUR INFORMATION
+
+We use your information to:
+
+**Provide Services:**
+- Process and abstract your leases
+- Generate PDF reports
+- Store and manage your documents
+- Provide ASC 842 calculations
+
+**Communications:**
+- Send service emails (upload confirmations, abstract ready)
+- Respond to support requests
+- Send account updates and security alerts
+- Marketing emails (you can opt-out)
+
+**Improve Services:**
+- Analyze usage patterns
+- Improve AI accuracy
+- Debug issues
+- Develop new features
+
+**Business Operations:**
+- Process payments
+- Prevent fraud
+- Comply with legal obligations
+- Enforce our Terms of Service
+
+**Legal Basis (GDPR):**
+- Contract performance (provide services)
+- Legitimate interest (improve services, prevent fraud)
+- Legal obligation (comply with laws)
+- Consent (marketing emails)
+
+## 3. HOW WE SHARE YOUR INFORMATION
+
+**3.1 We Do NOT Sell Your Data**
+We never sell your personal information or documents to third parties.
+
+**3.2 Service Providers**
+We share data with trusted providers:
+
+- **Supabase** (database hosting) - stores your account and document data
+- **OpenAI** (AI processing) - processes document text for extraction
+- **Stripe** (payments) - processes payments and subscriptions
+- **SendGrid** (email) - sends service and marketing emails
+- **Google Analytics** (analytics) - tracks website usage
+- **Vercel/AWS** (hosting) - hosts our application
+
+All providers are contractually required to protect your data and use it only for specified purposes.
+
+**3.3 Legal Requirements**
+We may disclose information:
+- To comply with laws or court orders
+- To enforce our Terms of Service
+- To protect our rights or safety
+- In connection with merger or acquisition (with notice)
+
+**3.4 Aggregated Data**
+We may share anonymized, aggregated statistics (e.g., "90% of leases include CAM charges") that do not identify you.
+
+## 4. DATA SECURITY
+
+**4.1 Security Measures**
+- **Encryption:** TLS 1.3 in transit, AES-256 at rest
+- **Access Controls:** Role-based access, multi-factor authentication
+- **Infrastructure:** SOC 2 Type II compliant providers
+- **Audits:** Regular security audits and penetration testing
+- **Employee Training:** Security awareness training
+
+**4.2 Your Responsibilities**
+- Use strong, unique passwords
+- Enable two-factor authentication
+- Keep login credentials confidential
+- Report suspicious activity immediately
+
+**4.3 Breach Notification**
+If a breach occurs, we will notify you within 72 hours per GDPR requirements.
+
+## 5. DATA RETENTION
+
+**5.1 Account Data**
+- Retained while account is active
+- Deleted 90 days after account closure (unless legal hold)
+
+**5.2 Documents**
+- Default retention: 7 years (industry standard)
+- You may delete documents anytime
+- Backups retained 90 days after deletion
+
+**5.3 Transaction Records**
+- Retained 7 years for tax/accounting purposes
+
+**5.4 Marketing Data**
+- Deleted when you opt-out or close account
+
+## 6. YOUR PRIVACY RIGHTS
+
+**6.1 Access and Portability**
+- Request copy of your data
+- Export your documents anytime
+- Response within 30 days
+
+**6.2 Correction**
+- Update account information in settings
+- Contact support for other corrections
+
+**6.3 Deletion**
+- Delete individual documents anytime
+- Close account and delete all data
+- Some data retained for legal compliance
+
+**6.4 Object to Processing**
+- Opt-out of marketing emails (link in emails)
+- Disable non-essential cookies
+- Object to automated decision-making
+
+**6.5 Restrict Processing**
+- Request processing restriction in certain cases
+
+**6.6 Withdraw Consent**
+- Withdraw consent for marketing anytime
+
+**6.7 Complaint**
+- File complaint with data protection authority
+- Contact us first at privacy@leaseai.com
+
+## 7. INTERNATIONAL DATA TRANSFERS
+
+**7.1 Data Location**
+- Primary data stored in USA (Supabase/AWS)
+- Backups in multiple regions
+
+**7.2 Transfers from EU/UK**
+We comply with GDPR through:
+- Standard Contractual Clauses with providers
+- Adequate security measures
+- Data Processing Agreements
+
+**7.3 Transfers from Canada**
+We comply with PIPEDA for Canadian users.
+
+## 8. CHILDREN'S PRIVACY
+
+LeaseAI is not intended for users under 18. We do not knowingly collect data from children. If we learn we have collected data from a child, we will delete it immediately.
+
+## 9. CALIFORNIA PRIVACY RIGHTS (CCPA)
+
+**9.1 Your Rights**
+California residents have rights to:
+- Know what data we collect
+- Delete your data
+- Opt-out of "sales" (we do not sell data)
+- Non-discrimination for exercising rights
+
+**9.2 Categories We Collect**
+- Identifiers (name, email, IP)
+- Commercial information (purchases)
+- Internet activity (usage data)
+- Professional information (company name)
+
+**9.3 How to Exercise Rights**
+Email privacy@leaseai.com or call (604) 555-0123
+
+**9.4 Authorized Agent**
+Authorized agents may submit requests with proof of authorization.
+
+## 10. NEVADA PRIVACY RIGHTS
+
+Nevada residents may opt-out of "sales" of covered information. We do not sell your data. To opt-out anyway: privacy@leaseai.com
+
+## 11. EUROPEAN ECONOMIC AREA (EEA) USERS
+
+**11.1 Data Controller**
+LeaseAI is the data controller.
+
+**11.2 Legal Bases**
+We process data based on:
+- Contract performance
+- Legitimate interests
+- Legal obligations
+- Consent
+
+**11.3 Your Rights**
+See Section 6 above for GDPR rights.
+
+**11.4 Supervisory Authority**
+Contact your local data protection authority with complaints.
+
+## 12. CHANGES TO THIS POLICY
+
+**12.1 Updates**
+- We may update this Policy with 30-days' notice
+- Material changes posted on website
+- Continued use constitutes acceptance
+
+**12.2 Notification**
+- Email notification of material changes
+- Policy version and date shown at top
+
+## 13. CONTACT US
+
+**Privacy Questions:**
+Email: privacy@leaseai.com  
+Phone: (604) 555-0123  
+Address: [Your Business Address]  
+
+**Data Protection Officer (if required):**
+Email: dpo@leaseai.com  
+
+**EU Representative (if required):**
+[EU Representative Details]  
+
+**Response Time:** We respond to privacy requests within 30 days.
+
+---
+
+## SUMMARY (Plain English)
+
+**What we collect:**
+- Your name, email, company info
+- Leases you upload
+- How you use our site
+
+**Why we collect it:**
+- Process your leases
+- Send you abstracts
+- Improve our service
+- Comply with laws
+
+**Who we share with:**
+- OpenAI (to extract lease data)
+- Stripe (to process payments)
+- SendGrid (to send emails)
+- Nobody else (we don't sell data)
+
+**Your rights:**
+- See your data anytime
+- Delete your account
+- Opt-out of marketing
+- Export your documents
+
+**Questions?**
+Email privacy@leaseai.com
+
+---
+
+**By using LeaseAI, you consent to this Privacy Policy.**
+
+Last Updated: October 5, 2026
