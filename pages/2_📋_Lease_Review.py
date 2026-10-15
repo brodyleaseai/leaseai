@@ -276,6 +276,58 @@ elif page == "🔍 Review a Lease":
             st.rerun()
 
     st.markdown("---")
+    
+    # Professional Report Actions
+    st.subheader("📄 Professional Reports")
+    
+    col_pdf, col_email, col_placeholder = st.columns([1, 1, 2])
+    
+    with col_pdf:
+        if st.button("📥 Generate PDF Report", use_container_width=True, type="primary"):
+            try:
+                from lease_report import generate_lease_abstract_pdf
+                
+                # Prepare extracted fields dictionary
+                extracted_dict = {}
+                for field in fields:
+                    field_name = field.get("field_name", "Unknown")
+                    extracted_dict[field_name] = {
+                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                        "confidence": field.get("confidence", "MEDIUM")
+                    }
+                
+                # Generate PDF
+                pdf_bytes = generate_lease_abstract_pdf(lease, extracted_dict)
+                
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download PDF Report",
+                    data=pdf_bytes,
+                    file_name=f"LeaseAbstract_{lease_id}_{lease.get('property_address', 'lease').replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                st.success("✅ PDF report generated successfully!")
+                
+            except Exception as e:
+                st.error(f"Failed to generate PDF: {str(e)}")
+    
+    with col_email:
+        if st.button("📧 Email Report to Client", use_container_width=True):
+            try:
+                from email_delivery import trigger_delivery_email
+                
+                success, message = trigger_delivery_email(lease_id, sb)
+                
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+                    
+            except Exception as e:
+                st.error(f"Failed to send email: {str(e)}")
+
+    st.markdown("---")
 
     high_count = sum(1 for f in fields if (f.get("confidence") or "").upper() == "HIGH")
     med_count  = sum(1 for f in fields if (f.get("confidence") or "").upper() == "MEDIUM")

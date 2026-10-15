@@ -111,18 +111,6 @@ if not st.session_state.get("authenticated", False):
                         st.error(f"❌ {message}")
                 else:
                     st.warning("Please enter both email and password")
-        
-        st.markdown("---")
-        st.info("""
-        **Demo Credentials:**
-        
-        **Admin Access:**
-        - Email: `admin@leaseai.com`
-        - Password: `admin123`
-        
-        **Client Access:**
-        - Check with your administrator for client credentials
-        """)
     
     st.stop()
 
