@@ -7,13 +7,7 @@ import streamlit as st
 from datetime import datetime
 from supabase import create_client
 import config
-
-# Initialize Supabase
-try:
-    sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
-except Exception as e:
-    st.error(f"Failed to connect to database: {e}")
-    st.stop()
+from auth_module import AuthManager
 
 # Page config
 st.set_page_config(
@@ -22,6 +16,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Initialize Supabase
+try:
+    sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+    auth = AuthManager(sb)
+except Exception as e:
+    st.error(f"Failed to connect to database: {e}")
+    st.stop()
 
 # Custom CSS
 st.markdown("""
@@ -74,16 +76,86 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>🏢 LeaseAI</h1>
-    <h2>Enterprise Lease Intelligence Platform</h2>
-    <p style="font-size: 1.1rem; margin-top: 1rem; opacity: 0.9;">
-        AI-powered lease abstraction • Amendment Resolution Graph™ • ASC 842 compliance
-    </p>
-</div>
-""", unsafe_allow_html=True)
+# Check if user is authenticated
+if not st.session_state.get("authenticated", False):
+    # Show login page
+    st.markdown("""
+    <div class="main-header">
+        <h1>🏢 LeaseAI</h1>
+        <h2>Enterprise Lease Intelligence Platform</h2>
+        <p style="font-size: 1.1rem; margin-top: 1rem; opacity: 0.9;">
+            AI-powered lease abstraction • Amendment Resolution Graph™ • ASC 842 compliance
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Login Form
+    st.markdown("### 🔐 Sign In")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Email", placeholder="your.email@company.com")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            submit = st.form_submit_button("Sign In", use_container_width=True, type="primary")
+            
+            if submit:
+                if username and password:
+                    success, role, message = auth.login(username, password)
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
+                else:
+                    st.warning("Please enter both email and password")
+        
+        st.markdown("---")
+        st.info("""
+        **Demo Credentials:**
+        
+        **Admin Access:**
+        - Email: `admin@leaseai.com`
+        - Password: `admin123`
+        
+        **Client Access:**
+        - Check with your administrator for client credentials
+        """)
+    
+    st.stop()
+
+# User is authenticated - show dashboard
+# Header with user info
+col_header1, col_header2 = st.columns([4, 1])
+
+with col_header1:
+    st.markdown("""
+    <div class="main-header">
+        <h1>🏢 LeaseAI</h1>
+        <h2>Enterprise Lease Intelligence Platform</h2>
+        <p style="font-size: 1.1rem; margin-top: 1rem; opacity: 0.9;">
+            AI-powered lease abstraction • Amendment Resolution Graph™ • ASC 842 compliance
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_header2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    user_name = st.session_state.get('user_name', 'User')
+    user_role = st.session_state.get('user_role', 'user').title()
+    
+    st.markdown(f"""
+    <div style="text-align: right; padding: 1rem; background: #1a1f2e; border-radius: 10px; margin-top: 1rem;">
+        <div style="color: #667eea; font-weight: 600;">{user_name}</div>
+        <div style="color: #8892b0; font-size: 0.85rem;">{user_role}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("Logout", use_container_width=True):
+        auth.logout()
+        st.rerun()
 
 # Quick Stats
 col1, col2, col3, col4 = st.columns(4)
@@ -222,19 +294,59 @@ st.markdown("<br>", unsafe_allow_html=True)
 # Quick Actions
 st.markdown("## ⚡ Quick Actions")
 
-col1, col2, col3 = st.columns(3)
+user_role = st.session_state.get('user_role', 'user')
 
-with col1:
-    if st.button("📤 Upload New Lease", use_container_width=True, type="primary"):
-        st.switch_page("pages/1_📤_Upload_Lease.py")
+if user_role == "admin":
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📤 Upload New Lease", use_container_width=True, type="primary"):
+            st.switch_page("pages/1_📤_Upload_Lease.py")
+    
+    with col2:
+        if st.button("🔗 Amendment Graph™", use_container_width=True):
+            st.switch_page("pages/3_🔗_Amendment_Graph.py")
+    
+    with col3:
+        if st.button("📊 Admin Dashboard", use_container_width=True):
+            st.switch_page("pages/4_📊_Admin_Dashboard.py")
+    
+    with col4:
+        if st.button("📈 ASC 842", use_container_width=True):
+            st.switch_page("pages/5_📈_ASC842_Dashboard.py")
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        if st.button("📋 Review Leases", use_container_width=True):
+            st.switch_page("pages/2_📋_Lease_Review.py")
+    
+    with col6:
+        if st.button("📅 Critical Dates", use_container_width=True):
+            st.switch_page("pages/6_📅_Critical_Dates.py")
+    
+    with col7:
+        st.button("💳 Billing", use_container_width=True, disabled=True, help="Coming soon")
+    
+    with col8:
+        st.button("📊 Analytics", use_container_width=True, disabled=True, help="Coming soon")
 
-with col2:
-    if st.button("🔗 View Amendment Graph™", use_container_width=True):
-        st.switch_page("pages/3_🔗_Amendment_Graph.py")
-
-with col3:
-    if st.button("📋 Review Leases", use_container_width=True):
-        st.switch_page("pages/2_📋_Lease_Review.py")
+else:  # Client role
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📤 Upload New Lease", use_container_width=True, type="primary"):
+            st.switch_page("pages/1_📤_Upload_Lease.py")
+    
+    with col2:
+        if st.button("👥 My Portal", use_container_width=True):
+            st.switch_page("pages/7_👥_Client_Portal.py")
+    
+    with col3:
+        if st.button("📋 My Leases", use_container_width=True):
+            st.switch_page("pages/2_📋_Lease_Review.py")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
