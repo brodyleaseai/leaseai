@@ -73,6 +73,37 @@ st.markdown("""
         font-weight: 600;
         display: inline-block;
     }
+    
+    /* Fix text input contrast for better readability */
+    input[type="text"], input[type="password"], input[type="email"] {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 2px solid #667eea !important;
+        border-radius: 8px !important;
+        padding: 0.75rem !important;
+        font-size: 1rem !important;
+    }
+    
+    input[type="text"]::placeholder, 
+    input[type="password"]::placeholder,
+    input[type="email"]::placeholder {
+        color: #9ca3af !important;
+        opacity: 0.7 !important;
+    }
+    
+    /* Make labels more visible */
+    label {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Streamlit input widget styling */
+    .stTextInput > div > div > input {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 2px solid #667eea !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 

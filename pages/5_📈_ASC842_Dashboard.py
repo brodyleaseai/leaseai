@@ -136,7 +136,7 @@ with tab1:
         
         st.markdown("---")
         
-        if st.button("🧮 Calculate ASC 842 Compliance", type="primary", use_container_width=True):
+        if st.button("🧮 Calculate ASC 842 Compliance", type="primary", width="stretch"):
             with st.spinner("Running comprehensive ASC 842 compliance calculations..."):
                 try:
                     # Build lease data dictionary
@@ -317,8 +317,25 @@ with tab1:
                         st.info(f"Note: Could not save to database (table may not exist): {str(db_error)}")
                 
                 except Exception as e:
-                    st.error(f"❌ Calculation Error: {str(e)}")
-                    st.exception(e)
+                    st.error(f"❌ **Calculation Error**")
+                    st.error(f"**Error Message:** {str(e)}")
+                    
+                    # Show detailed error info
+                    with st.expander("🔍 Detailed Error Information (Click to expand)"):
+                        st.write("**Error Type:**", type(e).__name__)
+                        st.write("**Error Details:**", str(e))
+                        st.code(f"{type(e).__name__}: {str(e)}")
+                        
+                        # Show the full traceback
+                        import traceback
+                        st.code(traceback.format_exc())
+                    
+                    st.info("💡 **Troubleshooting Tips:**\n"
+                           "- Make sure all required fields are filled in\n"
+                           "- Check that dates are valid (end date after commencement)\n"
+                           "- Verify payment amounts are positive numbers\n"
+                           "- Discount rate should be between 0% and 20%")
+
 
 with tab2:
     st.subheader("📊 View Past Calculations")
