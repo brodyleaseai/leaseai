@@ -636,12 +636,39 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         }).eq("id", lease_id).execute()
         print(f"✓ Lease status updated")
         
-        print(f"[7/7] Extracting and adding critical dates...")
+        print(f"[7/8] Extracting and adding critical dates...")
         try:
             self.extract_and_add_critical_dates(lease_id, extracted_fields, supabase_client)
             print(f"✓ Critical dates extracted and added")
         except Exception as e:
             print(f"⚠ Failed to extract critical dates: {e}")
+        
+        print(f"[8/8] Seeding Amendment Resolution Graph™ clause history...")
+        try:
+            from seed_lease_history import seed_base_lease_clause_history
+            
+            # Get commencement date for history seeding
+            commencement_field = extracted_fields.get("Lease Commencement Date", {})
+            if isinstance(commencement_field, dict):
+                commencement_date = commencement_field.get("value", datetime.utcnow().strftime("%Y-%m-%d"))
+            else:
+                commencement_date = commencement_field or datetime.utcnow().strftime("%Y-%m-%d")
+            
+            # Parse date if needed
+            if len(commencement_date) > 10:
+                commencement_date = commencement_date[:10]
+            
+            records_created = seed_base_lease_clause_history(
+                lease_id=lease_id,
+                extracted_fields=extracted_fields,
+                lease_commencement_date=commencement_date,
+                supabase_client=supabase_client
+            )
+            print(f"✓ Seeded {records_created} base clause history records")
+        except Exception as e:
+            print(f"⚠ Failed to seed clause history: {e}")
+            import traceback
+            traceback.print_exc()
         
         print(f"✓ Processing complete!")
         

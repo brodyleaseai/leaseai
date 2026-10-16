@@ -405,10 +405,10 @@ with tab4:
                     tmp_path = tmp_file.name
                 
                 try:
-                    # Process amendment
-                    from amendment_processor import AmendmentProcessor
+                    # Process amendment with enhanced v2 processor
+                    from amendment_processor_v2 import AmendmentProcessorV2
                     
-                    processor = AmendmentProcessor()
+                    processor = AmendmentProcessorV2()
                     amendment_id, extracted_fields = processor.process_amendment(
                         pdf_path=tmp_path,
                         lease_id=selected_lease_id,
