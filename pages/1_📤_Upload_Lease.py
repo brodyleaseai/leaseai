@@ -50,6 +50,10 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Initialize session state for successful uploads
+if "last_processed_lease" not in st.session_state:
+    st.session_state.last_processed_lease = None
+
 # Upload form
 with st.form("upload_lease_form"):
     st.markdown("### 📄 Lease Document")
@@ -100,69 +104,82 @@ with st.form("upload_lease_form"):
     
     # Submit button
     submitted = st.form_submit_button("🚀 Process Lease", type="primary", use_container_width=True)
+
+# Process form submission (OUTSIDE the form)
+if submitted:
+    if not uploaded_file:
+        st.error("Please upload a PDF file")
+    elif not property_address:
+        st.error("Please enter property address")
+    elif not tenant_name:
+        st.error("Please enter tenant name")
+    elif not client_id:
+        st.error("Please select a client")
+    else:
+        with st.spinner("Processing lease with OCR and AI extraction... This may take 30-60 seconds..."):
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_path = tmp_file.name
+            
+            try:
+                # Process lease
+                from extraction_pipeline import LeaseExtractionPipeline
+                
+                pipeline = LeaseExtractionPipeline()
+                lease_id, extracted_fields = pipeline.process_lease(
+                    pdf_path=tmp_path,
+                    client_id=client_id,
+                    supabase_client=sb,
+                    property_address=property_address,
+                    tenant_name=tenant_name,
+                    filename=uploaded_file.name
+                )
+                
+                # Store in session state for display after form
+                st.session_state.last_processed_lease = {
+                    "lease_id": lease_id,
+                    "extracted_fields": extracted_fields
+                }
+                
+                st.success(f"✅ Lease processed successfully!")
+                st.success(f"Lease ID: {lease_id}")
+                
+            except Exception as e:
+                st.error(f"❌ Error processing lease: {str(e)}")
+                import traceback
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
+            
+            finally:
+                # Clean up temp file
+                os.unlink(tmp_path)
+
+# Display results if available (OUTSIDE the form)
+if st.session_state.last_processed_lease:
+    lease_data = st.session_state.last_processed_lease
+    extracted_fields = lease_data["extracted_fields"]
     
-    if submitted:
-        if not uploaded_file:
-            st.error("Please upload a PDF file")
-        elif not property_address:
-            st.error("Please enter property address")
-        elif not tenant_name:
-            st.error("Please enter tenant name")
-        elif not client_id:
-            st.error("Please select a client")
-        else:
-            with st.spinner("Processing lease with OCR and AI extraction... This may take 30-60 seconds..."):
-                # Save uploaded file temporarily
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                try:
-                    # Process lease
-                    from extraction_pipeline import LeaseExtractionPipeline
-                    
-                    pipeline = LeaseExtractionPipeline()
-                    lease_id, extracted_fields = pipeline.process_lease(
-                        pdf_path=tmp_path,
-                        client_id=client_id,
-                        supabase_client=sb,
-                        property_address=property_address,
-                        tenant_name=tenant_name,
-                        filename=uploaded_file.name
-                    )
-                    
-                    st.success(f"✅ Lease processed successfully!")
-                    st.success(f"Lease ID: {lease_id}")
-                    
-                    st.markdown("### 📊 Extraction Summary")
-                    
-                    high_conf = sum(1 for f in extracted_fields.values() 
-                                   if isinstance(f, dict) and f.get('confidence') == 'HIGH')
-                    medium_conf = sum(1 for f in extracted_fields.values() 
-                                     if isinstance(f, dict) and f.get('confidence') == 'MEDIUM')
-                    low_conf = sum(1 for f in extracted_fields.values() 
-                                  if isinstance(f, dict) and f.get('confidence') == 'LOW')
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Total Fields", len(extracted_fields))
-                    col2.metric("High Confidence", high_conf)
-                    col3.metric("Medium Confidence", medium_conf)
-                    col4.metric("Low Confidence", low_conf)
-                    
-                    st.info("💡 Go to **Lease Review** to review and approve the extracted fields!")
-                    
-                    if st.button("📋 Review This Lease", type="primary"):
-                        st.switch_page("pages/2_📋_Lease_Review.py")
-                    
-                except Exception as e:
-                    st.error(f"❌ Error processing lease: {str(e)}")
-                    import traceback
-                    with st.expander("Error Details"):
-                        st.code(traceback.format_exc())
-                
-                finally:
-                    # Clean up temp file
-                    os.unlink(tmp_path)
+    st.markdown("---")
+    st.markdown("### 📊 Extraction Summary")
+    
+    high_conf = sum(1 for f in extracted_fields.values() 
+                       if isinstance(f, dict) and f.get('confidence') == 'HIGH')
+    medium_conf = sum(1 for f in extracted_fields.values() 
+                     if isinstance(f, dict) and f.get('confidence') == 'MEDIUM')
+    low_conf = sum(1 for f in extracted_fields.values() 
+                  if isinstance(f, dict) and f.get('confidence') == 'LOW')
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Fields", len(extracted_fields))
+    col2.metric("High Confidence", high_conf)
+    col3.metric("Medium Confidence", medium_conf)
+    col4.metric("Low Confidence", low_conf)
+    
+    st.info("💡 Go to **Lease Review** to review and approve the extracted fields!")
+    
+    if st.button("📋 Review This Lease", type="primary"):
+        st.switch_page("pages/2_📋_Lease_Review.py")
 
 st.markdown("---")
 
