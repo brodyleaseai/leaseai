@@ -43,6 +43,15 @@ st.markdown("""
         padding: 2rem;
         margin-bottom: 1rem;
         transition: transform 0.2s;
+        color: #e5e7eb;
+    }
+    .feature-card h3 {
+        color: #ffffff;
+        margin-top: 0;
+    }
+    .feature-card p {
+        color: #d1d5db;
+        line-height: 1.6;
     }
     .feature-card:hover {
         transform: translateY(-5px);
