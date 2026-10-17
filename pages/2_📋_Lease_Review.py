@@ -133,11 +133,22 @@ def update_lease_status(lease_id, status):
 with st.sidebar:
     st.markdown("## 🏢 LeaseAI")
     st.markdown("---")
+    
+    # Default to the review page if coming from upload
+    default_page = st.session_state.get("review_page", "📋 Lease Dashboard")
+    default_index = ["📋 Lease Dashboard", "🔍 Review a Lease", "⬆️ Process New Lease"].index(default_page) if default_page in ["📋 Lease Dashboard", "🔍 Review a Lease", "⬆️ Process New Lease"] else 0
+    
     page = st.radio(
         "Navigation",
         ["📋 Lease Dashboard", "🔍 Review a Lease", "⬆️ Process New Lease"],
+        index=default_index,
         label_visibility="collapsed",
     )
+    
+    # Clear the session state after using it
+    if "review_page" in st.session_state:
+        del st.session_state["review_page"]
+    
     st.markdown("---")
     st.markdown('<span style="font-size:0.75rem; color:#555;">LeaseAI v1.0 — Phase 4</span>', unsafe_allow_html=True)
 

@@ -179,6 +179,9 @@ if st.session_state.last_processed_lease:
     st.info("💡 Go to **Lease Review** to review and approve the extracted fields!")
     
     if st.button("📋 Review This Lease", type="primary"):
+        # Store the lease ID so the review page can auto-select it
+        st.session_state["review_lease_id"] = lease_data["lease_id"]
+        st.session_state["review_page"] = "🔍 Review a Lease"  # Go directly to review page with buttons
         st.switch_page("pages/2_📋_Lease_Review.py")
 
 st.markdown("---")
