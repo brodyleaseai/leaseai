@@ -316,6 +316,19 @@ elif page == "🔍 Review a Lease":
                 # Generate PDF
                 pdf_bytes = generate_lease_abstract_pdf(lease, extracted_dict)
                 
+                # Log export
+                try:
+                    sb.table("export_history").insert({
+                        "lease_id": lease_id,
+                        "user_id": st.session_state.get("user_id"),
+                        "export_type": "PDF_REPORT",
+                        "export_format": "PDF",
+                        "file_size_bytes": len(pdf_bytes),
+                        "fields_exported": list(extracted_dict.keys())
+                    }).execute()
+                except:
+                    pass  # Don't fail export if logging fails
+                
                 # Offer download
                 st.download_button(
                     label="⬇️ Download PDF Report",
@@ -361,6 +374,19 @@ elif page == "🔍 Review a Lease":
                 # Generate Yardi CSV
                 csv_bytes = export_to_yardi(lease, extracted_dict)
                 
+                # Log export
+                try:
+                    sb.table("export_history").insert({
+                        "lease_id": lease_id,
+                        "user_id": st.session_state.get("user_id"),
+                        "export_type": "YARDI_CSV",
+                        "export_format": "CSV",
+                        "file_size_bytes": len(csv_bytes),
+                        "fields_exported": list(extracted_dict.keys())
+                    }).execute()
+                except:
+                    pass
+                
                 # Offer download
                 st.download_button(
                     label="⬇️ Download Yardi CSV",
@@ -390,6 +416,19 @@ elif page == "🔍 Review a Lease":
                 
                 # Generate MRI CSV
                 csv_bytes = export_to_mri(lease, extracted_dict)
+                
+                # Log export
+                try:
+                    sb.table("export_history").insert({
+                        "lease_id": lease_id,
+                        "user_id": st.session_state.get("user_id"),
+                        "export_type": "MRI_CSV",
+                        "export_format": "CSV",
+                        "file_size_bytes": len(csv_bytes),
+                        "fields_exported": list(extracted_dict.keys())
+                    }).execute()
+                except:
+                    pass
                 
                 # Offer download
                 st.download_button(
