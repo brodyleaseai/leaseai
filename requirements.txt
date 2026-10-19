@@ -2,6 +2,7 @@
 streamlit>=1.64.0
 supabase>=2.0.0
 openai>=1.0.0
+python-dateutil>=2.8.0       # Date parsing for lease comparison
 
 # PDF Processing
 PyPDF2>=3.0.0
