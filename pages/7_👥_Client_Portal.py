@@ -40,9 +40,10 @@ if not st.session_state.get("authenticated", False):
         st.switch_page("Home.py")
     st.stop()
 
-# Check client role
-if st.session_state.get("user_role") != "client":
-    st.error("🚫 Client portal access only.")
+# Allow both admins and clients to access
+user_role = st.session_state.get("user_role")
+if user_role not in ["client", "admin"]:
+    st.error("🚫 Access denied. Client or admin access required.")
     if st.button("← Go to Home"):
         st.switch_page("Home.py")
     st.stop()
@@ -63,14 +64,19 @@ st.markdown("---")
 # Dashboard Overview
 st.subheader("📊 Your Lease Dashboard")
 
-client_id = st.session_state.get("user_id")
+# Get client_id based on role
+user_role = st.session_state.get("user_role")
+if user_role == "admin":
+    # Admins see all leases
+    leases_response = sb.table("leases").select("id, filename, status, created_at, page_count").order("created_at", desc=True).execute()
+    export_history_response = sb.table("export_history").select("*").order("exported_at", desc=True).limit(10).execute()
+else:
+    # Clients see only their leases
+    client_id = st.session_state.get("user_id")
+    leases_response = sb.table("leases").select("id, filename, status, created_at, page_count").eq("client_id", client_id).order("created_at", desc=True).execute()
+    export_history_response = sb.table("export_history").select("*").eq("user_id", client_id).order("exported_at", desc=True).limit(10).execute()
 
-# Fetch client's leases
-leases_response = sb.table("leases").select("id, filename, status, created_at, page_count").eq("client_id", client_id).order("created_at", desc=True).execute()
 leases = leases_response.data or []
-
-# Fetch export history
-export_history_response = sb.table("export_history").select("*").eq("user_id", client_id).order("exported_at", desc=True).limit(10).execute()
 export_history = export_history_response.data or []
 
 total_leases = len(leases)
