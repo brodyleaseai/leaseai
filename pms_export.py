@@ -55,6 +55,15 @@ class YardiExporter:
         
         writer.writeheader()
         
+        # DEBUG - Check extraction
+        commencement_raw = YardiExporter._extract_field(extracted_fields, 'Lease Commencement Date', '')
+        print(f"DEBUG - Commencement raw: '{commencement_raw}'")
+        
+        rent_raw = YardiExporter._extract_field(extracted_fields, 'Base Rent Year 1 (monthly)', '')
+        print(f"DEBUG - Rent raw: '{rent_raw}'")
+        rent_amount = YardiExporter._extract_amount(rent_raw)
+        print(f"DEBUG - Rent amount: '{rent_amount}'")
+        
         # Map LeaseAI fields to Yardi fields
         row = {
             'PropertyCode': YardiExporter._clean_value(lease_data.get('property_address', '')),
