@@ -58,34 +58,34 @@ class YardiExporter:
         # Map LeaseAI fields to Yardi fields
         row = {
             'PropertyCode': YardiExporter._clean_value(lease_data.get('property_address', '')),
-            'UnitCode': YardiExporter._extract_field(extracted_fields, 'Unit Number', ''),
+            'UnitCode': YardiExporter._extract_field(extracted_fields, 'Suite / Unit Number', ''),
             'TenantCode': YardiExporter._extract_field(extracted_fields, 'Tenant ID', ''),
             'TenantName': YardiExporter._extract_field(extracted_fields, 'Tenant Legal Name', ''),
             'LeaseStartDate': YardiExporter._format_date(
-                YardiExporter._extract_field(extracted_fields, 'Lease Start Date', '')
+                YardiExporter._extract_field(extracted_fields, 'Lease Commencement Date', '')
             ),
             'LeaseEndDate': YardiExporter._format_date(
-                YardiExporter._extract_field(extracted_fields, 'Lease End Date', '')
+                YardiExporter._extract_field(extracted_fields, 'Lease Expiration Date', '')
             ),
             'RentAmount': YardiExporter._extract_amount(
-                YardiExporter._extract_field(extracted_fields, 'Base Rent', '')
+                YardiExporter._extract_field(extracted_fields, 'Base Rent Year 1 (monthly)', '')
             ),
-            'RentFrequency': YardiExporter._extract_field(extracted_fields, 'Rent Payment Frequency', 'Monthly'),
+            'RentFrequency': 'Monthly',
             'SecurityDeposit': YardiExporter._extract_amount(
-                YardiExporter._extract_field(extracted_fields, 'Security Deposit', '')
+                YardiExporter._extract_field(extracted_fields, 'Security Deposit Amount', '')
             ),
             'SquareFootage': YardiExporter._extract_amount(
-                YardiExporter._extract_field(extracted_fields, 'Rentable Square Footage', '')
+                YardiExporter._extract_field(extracted_fields, 'Premises Square Footage (RSF)', '')
             ),
             'UseType': YardiExporter._extract_field(extracted_fields, 'Permitted Use', ''),
-            'EscalationType': YardiExporter._extract_field(extracted_fields, 'Rent Escalation Type', ''),
-            'EscalationRate': YardiExporter._extract_field(extracted_fields, 'Rent Escalation Percentage', ''),
+            'EscalationType': YardiExporter._extract_field(extracted_fields, 'Annual Escalation Type', ''),
+            'EscalationRate': YardiExporter._extract_field(extracted_fields, 'Annual Escalation Rate or Cap', ''),
             'CAMCharges': YardiExporter._extract_amount(
-                YardiExporter._extract_field(extracted_fields, 'CAM Base Amount', '')
+                YardiExporter._extract_field(extracted_fields, 'CAM / Operating Cost Charges', '')
             ),
-            'CAMMethod': YardiExporter._extract_field(extracted_fields, 'CAM Calculation Method', ''),
+            'CAMMethod': '',  # Not extracted in current schema
             'RenewalOptions': YardiExporter._extract_field(extracted_fields, 'Number of Renewal Options', ''),
-            'NoticeRequired': YardiExporter._extract_field(extracted_fields, 'Non-Renewal Notice Period', ''),
+            'NoticeRequired': YardiExporter._extract_field(extracted_fields, 'Renewal Notice Deadline', ''),
             'LeaseType': YardiExporter._extract_field(extracted_fields, 'Lease Type', 'Commercial'),
             'Status': lease_data.get('status', 'ACTIVE')
         }
@@ -209,10 +209,10 @@ class MRIExporter:
         writer.writeheader()
         
         # Extract values
-        base_rent = MRIExporter._extract_field(extracted_fields, 'Base Rent', '')
+        base_rent = MRIExporter._extract_field(extracted_fields, 'Base Rent Year 1 (monthly)', '')
         base_rent_amount = MRIExporter._extract_amount(base_rent)
         square_footage = MRIExporter._extract_amount(
-            MRIExporter._extract_field(extracted_fields, 'Rentable Square Footage', '0')
+            MRIExporter._extract_field(extracted_fields, 'Premises Square Footage (RSF)', '0')
         )
         
         # Calculate rent per square foot
@@ -238,36 +238,36 @@ class MRIExporter:
         row = {
             'Property_ID': MRIExporter._clean_value(lease_data.get('property_address', '')),
             'Building_ID': MRIExporter._extract_field(extracted_fields, 'Building Name', ''),
-            'Unit_ID': MRIExporter._extract_field(extracted_fields, 'Unit Number', ''),
+            'Unit_ID': MRIExporter._extract_field(extracted_fields, 'Suite / Unit Number', ''),
             'Tenant_ID': MRIExporter._extract_field(extracted_fields, 'Tenant ID', ''),
             'Tenant_Name': MRIExporter._extract_field(extracted_fields, 'Tenant Legal Name', ''),
             'Lease_Start': MRIExporter._format_date(
-                MRIExporter._extract_field(extracted_fields, 'Lease Start Date', '')
+                MRIExporter._extract_field(extracted_fields, 'Lease Commencement Date', '')
             ),
             'Lease_Expiration': MRIExporter._format_date(
-                MRIExporter._extract_field(extracted_fields, 'Lease End Date', '')
+                MRIExporter._extract_field(extracted_fields, 'Lease Expiration Date', '')
             ),
             'Monthly_Rent': base_rent_amount,
             'Annual_Rent': annual_rent,
             'Square_Feet': square_footage,
             'Rent_PSF': rent_psf,
             'Security_Deposit': MRIExporter._extract_amount(
-                MRIExporter._extract_field(extracted_fields, 'Security Deposit', '')
+                MRIExporter._extract_field(extracted_fields, 'Security Deposit Amount', '')
             ),
             'Lease_Type': MRIExporter._extract_field(extracted_fields, 'Lease Type', 'Gross'),
             'Use_Code': MRIExporter._extract_field(extracted_fields, 'Permitted Use', ''),
-            'Escalation_Type': MRIExporter._extract_field(extracted_fields, 'Rent Escalation Type', ''),
-            'Escalation_Percent': MRIExporter._extract_field(extracted_fields, 'Rent Escalation Percentage', ''),
+            'Escalation_Type': MRIExporter._extract_field(extracted_fields, 'Annual Escalation Type', ''),
+            'Escalation_Percent': MRIExporter._extract_field(extracted_fields, 'Annual Escalation Rate or Cap', ''),
             'Operating_Expense_Base': MRIExporter._extract_amount(
-                MRIExporter._extract_field(extracted_fields, 'Operating Expense Base Year Amount', '')
+                MRIExporter._extract_field(extracted_fields, 'Base Year for Operating Expenses', '')
             ),
-            'Operating_Expense_Method': MRIExporter._extract_field(extracted_fields, 'CAM Calculation Method', ''),
+            'Operating_Expense_Method': '',  # Not extracted in current schema
             'Renewal_Option_Count': MRIExporter._extract_field(extracted_fields, 'Number of Renewal Options', ''),
             'Notice_Days': MRIExporter._parse_notice_days(
-                MRIExporter._extract_field(extracted_fields, 'Non-Renewal Notice Period', '')
+                MRIExporter._extract_field(extracted_fields, 'Renewal Notice Deadline', '')
             ),
             'Tenant_Improvement_Allowance': MRIExporter._extract_amount(
-                MRIExporter._extract_field(extracted_fields, 'Tenant Improvement Allowance', '')
+                MRIExporter._extract_field(extracted_fields, 'Tenant Improvement Allowance (TIA)', '')
             ),
             'Free_Rent_Months': MRIExporter._extract_field(extracted_fields, 'Free Rent Period', ''),
             'Status': lease_data.get('status', 'ACTIVE')
