@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS export_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     lease_id UUID REFERENCES leases(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID,  -- Removed foreign key constraint to users table
     export_type VARCHAR(50) NOT NULL, -- 'PDF_REPORT', 'YARDI_CSV', 'MRI_CSV', 'ASC842_REPORT'
     export_format VARCHAR(20), -- 'PDF', 'CSV', 'XLSX'
     file_size_bytes INTEGER,
@@ -67,7 +67,7 @@ CREATE INDEX idx_lease_processing_status ON lease_processing_status(status);
 
 CREATE TABLE IF NOT EXISTS lease_comparisons (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID,  -- Removed foreign key constraint to users table
     lease_a_id UUID REFERENCES leases(id) ON DELETE CASCADE,
     lease_b_id UUID REFERENCES leases(id) ON DELETE CASCADE,
     
@@ -90,7 +90,7 @@ CREATE INDEX idx_lease_comparisons_created_at ON lease_comparisons(created_at DE
 
 CREATE TABLE IF NOT EXISTS portal_activity_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID,  -- Removed foreign key constraint to users table
     activity_type VARCHAR(50) NOT NULL, -- LOGIN, UPLOAD, VIEW_LEASE, DOWNLOAD_REPORT, COMPARE_LEASES
     resource_type VARCHAR(50), -- LEASE, REPORT, EXPORT
     resource_id UUID,
@@ -112,7 +112,7 @@ CREATE INDEX idx_portal_activity_type ON portal_activity_log(activity_type);
 -- Store client-specific settings and preferences
 
 CREATE TABLE IF NOT EXISTS client_preferences (
-    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID PRIMARY KEY,  -- Removed foreign key constraint to users table
     
     -- Dashboard preferences
     default_view VARCHAR(50) DEFAULT 'GRID', -- GRID, LIST, TIMELINE
