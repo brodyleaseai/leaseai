@@ -133,6 +133,7 @@ with tab1:
             with col_d:
                 if st.button("View", key=f"view_{lease['id']}"):
                     st.session_state["review_lease_id"] = lease["id"]
+                    st.session_state["review_page"] = "🔍 Review a Lease"  # Go directly to review page
                     st.switch_page("pages/2_📋_Lease_Review.py")
             
             st.divider()
@@ -178,6 +179,7 @@ with tab2:
                 lease_id = export.get("lease_id")
                 if lease_id and st.button("View", key=f"export_{export['id']}"):
                     st.session_state["review_lease_id"] = lease_id
+                    st.session_state["review_page"] = "🔍 Review a Lease"  # Go directly to review page
                     st.switch_page("pages/2_📋_Lease_Review.py")
             
             st.divider()
