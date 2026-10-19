@@ -324,9 +324,12 @@ if page == "📋 Lease Dashboard":
                 try:
                     from generic_export import export_all_leases_excel_zip
                     
-                    # Fetch all fields for all leases
+                    # Fetch all fields and ASC 842 data for all leases
                     all_extracted = []
+                    all_asc842 = []
+                    
                     for lease in leases:
+                        # Fetch extracted fields
                         fields_response = sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
                         fields_data = fields_response.data or []
                         
@@ -339,9 +342,19 @@ if page == "📋 Lease Dashboard":
                                 "confidence": field.get("confidence", "MEDIUM")
                             }
                         all_extracted.append(extracted_dict)
+                        
+                        # Fetch ASC 842 data if available
+                        try:
+                            asc842_response = sb.table("asc842_calculations").select("*").eq("lease_id", lease['id']).order("calculation_date", desc=True).limit(1).execute()
+                            if asc842_response.data:
+                                all_asc842.append(asc842_response.data[0])
+                            else:
+                                all_asc842.append(None)
+                        except:
+                            all_asc842.append(None)
                     
-                    # Generate ZIP of Excel files
-                    zip_bytes = export_all_leases_excel_zip(leases, all_extracted)
+                    # Generate ZIP of Excel files with ASC 842 data
+                    zip_bytes = export_all_leases_excel_zip(leases, all_extracted, all_asc842)
                     
                     # Log export
                     try:
@@ -683,8 +696,17 @@ elif page == "🔍 Review a Lease":
                         "confidence": field.get("confidence", "MEDIUM")
                     }
                 
-                # Generate Excel workbook
-                excel_bytes = export_lease_to_excel(lease, extracted_dict)
+                # Fetch ASC 842 calculations if available
+                asc842_data = None
+                try:
+                    asc842_response = sb.table("asc842_calculations").select("*").eq("lease_id", lease_id).order("calculation_date", desc=True).limit(1).execute()
+                    if asc842_response.data:
+                        asc842_data = asc842_response.data[0]
+                except:
+                    pass  # No ASC 842 data available
+                
+                # Generate Excel workbook with ASC 842 data
+                excel_bytes = export_lease_to_excel(lease, extracted_dict, asc842_data)
                 
                 # Log export
                 try:
@@ -707,7 +729,11 @@ elif page == "🔍 Review a Lease":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-                st.success("✅ Excel workbook generated! Includes Summary, Fields, and Critical Dates sheets.")
+                
+                sheets_msg = "Summary, Fields, ASC 842, and Critical Dates sheets"
+                if asc842_data:
+                    sheets_msg = "Includes ASC 842 calculations! " + sheets_msg
+                st.success(f"✅ Excel workbook generated! {sheets_msg}.")
                 
             except Exception as e:
                 st.error(f"Failed to generate Excel export: {str(e)}")
