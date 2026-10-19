@@ -246,11 +246,12 @@ elif page == "🔍 Review a Lease":
         index=list(options.keys()).index(default_label) if default_label else 0,
     )
     
-    # Clear review_lease_id after using it for auto-selection
-    if "review_lease_id" in st.session_state:
-        del st.session_state["review_lease_id"]
-    
     lease_id = options[selected_label]
+    
+    # Only clear review_lease_id if user manually selected a different lease
+    # (Don't clear it if we just auto-selected it - let it persist so the lease stays selected)
+    if "review_lease_id" in st.session_state and st.session_state["review_lease_id"] != lease_id:
+        del st.session_state["review_lease_id"]
     lease    = fetch_lease(lease_id)
     fields   = fetch_fields(lease_id)
 
