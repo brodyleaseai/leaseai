@@ -193,7 +193,7 @@ if page == "📋 Lease Dashboard":
     # Bulk Export Actions
     if leases:
         st.markdown("### 📦 Bulk Export Actions")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             if st.button("📊 Export All to Yardi CSV", use_container_width=True):
@@ -272,6 +272,102 @@ if page == "📋 Lease Dashboard":
                     st.error(f"Export failed: {str(e)}")
         
         with col3:
+            if st.button("📄 Export All to CSV", use_container_width=True):
+                try:
+                    from generic_export import export_all_leases_consolidated_csv
+                    
+                    # Fetch all fields for all leases
+                    all_extracted = []
+                    for lease in leases:
+                        fields_response = sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
+                        fields_data = fields_response.data or []
+                        
+                        # Convert to dict format
+                        extracted_dict = {}
+                        for field in fields_data:
+                            field_name = field.get("field_name", "Unknown")
+                            extracted_dict[field_name] = {
+                                "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                                "confidence": field.get("confidence", "MEDIUM")
+                            }
+                        all_extracted.append(extracted_dict)
+                    
+                    # Generate consolidated CSV
+                    csv_bytes = export_all_leases_consolidated_csv(leases, all_extracted)
+                    
+                    # Log export
+                    try:
+                        sb.table("export_history").insert({
+                            "user_id": st.session_state.get("user_id"),
+                            "export_type": "GENERIC_CSV_BULK",
+                            "export_format": "CSV",
+                            "file_size_bytes": len(csv_bytes),
+                            "date_range": {"count": len(leases)}
+                        }).execute()
+                    except:
+                        pass
+                    
+                    # Offer download
+                    st.download_button(
+                        label=f"⬇️ Download All {len(leases)} Leases (CSV)",
+                        data=csv_bytes,
+                        file_name=f"All_Leases_Consolidated_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    st.success(f"✅ Exported {len(leases)} leases to consolidated CSV!")
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+        
+        with col4:
+            if st.button("📊 Export All to Excel", use_container_width=True):
+                try:
+                    from generic_export import export_all_leases_excel_zip
+                    
+                    # Fetch all fields for all leases
+                    all_extracted = []
+                    for lease in leases:
+                        fields_response = sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
+                        fields_data = fields_response.data or []
+                        
+                        # Convert to dict format
+                        extracted_dict = {}
+                        for field in fields_data:
+                            field_name = field.get("field_name", "Unknown")
+                            extracted_dict[field_name] = {
+                                "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                                "confidence": field.get("confidence", "MEDIUM")
+                            }
+                        all_extracted.append(extracted_dict)
+                    
+                    # Generate ZIP of Excel files
+                    zip_bytes = export_all_leases_excel_zip(leases, all_extracted)
+                    
+                    # Log export
+                    try:
+                        sb.table("export_history").insert({
+                            "user_id": st.session_state.get("user_id"),
+                            "export_type": "EXCEL_BULK",
+                            "export_format": "ZIP",
+                            "file_size_bytes": len(zip_bytes),
+                            "date_range": {"count": len(leases)}
+                        }).execute()
+                    except:
+                        pass
+                    
+                    # Offer download
+                    st.download_button(
+                        label=f"⬇️ Download All {len(leases)} Leases (Excel ZIP)",
+                        data=zip_bytes,
+                        file_name=f"All_Leases_Excel_{datetime.now().strftime('%Y%m%d')}.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+                    st.success(f"✅ Exported {len(leases)} leases to Excel format (ZIP)!")
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+        
+        with col5:
             if st.button("📦 Bulk Upload", use_container_width=True):
                 st.switch_page("pages/9_📦_Bulk_Upload.py")
         
@@ -382,9 +478,9 @@ elif page == "🔍 Review a Lease":
     st.markdown("---")
     
     # Professional Report Actions
-    st.subheader("📄 Professional Reports")
+    st.subheader("📄 Professional Reports & Exports")
     
-    col_pdf, col_email, col_yardi, col_mri = st.columns([1, 1, 1, 1])
+    col_pdf, col_email, col_yardi, col_mri, col_csv, col_excel = st.columns([1, 1, 1, 1, 1, 1])
     
     with col_pdf:
         if st.button("📥 Generate PDF Report", use_container_width=True, type="primary"):
@@ -529,6 +625,92 @@ elif page == "🔍 Review a Lease":
                 
             except Exception as e:
                 st.error(f"Failed to generate MRI export: {str(e)}")
+    
+    with col_csv:
+        if st.button("📄 Export to CSV", use_container_width=True):
+            try:
+                from generic_export import export_lease_to_csv
+                
+                # Prepare extracted fields dictionary
+                extracted_dict = {}
+                for field in fields:
+                    field_name = field.get("field_name", "Unknown")
+                    extracted_dict[field_name] = {
+                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                        "confidence": field.get("confidence", "MEDIUM")
+                    }
+                
+                # Generate Generic CSV
+                csv_bytes = export_lease_to_csv(lease, extracted_dict)
+                
+                # Log export
+                try:
+                    sb.table("export_history").insert({
+                        "lease_id": lease_id,
+                        "user_id": st.session_state.get("user_id"),
+                        "export_type": "GENERIC_CSV",
+                        "export_format": "CSV",
+                        "file_size_bytes": len(csv_bytes),
+                        "fields_exported": list(extracted_dict.keys())
+                    }).execute()
+                except:
+                    pass
+                
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download CSV",
+                    data=csv_bytes,
+                    file_name=f"LeaseAbstract_{lease_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("✅ Generic CSV generated! All 84+ fields included.")
+                
+            except Exception as e:
+                st.error(f"Failed to generate CSV export: {str(e)}")
+    
+    with col_excel:
+        if st.button("📊 Export to Excel", use_container_width=True):
+            try:
+                from generic_export import export_lease_to_excel
+                
+                # Prepare extracted fields dictionary
+                extracted_dict = {}
+                for field in fields:
+                    field_name = field.get("field_name", "Unknown")
+                    extracted_dict[field_name] = {
+                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                        "confidence": field.get("confidence", "MEDIUM")
+                    }
+                
+                # Generate Excel workbook
+                excel_bytes = export_lease_to_excel(lease, extracted_dict)
+                
+                # Log export
+                try:
+                    sb.table("export_history").insert({
+                        "lease_id": lease_id,
+                        "user_id": st.session_state.get("user_id"),
+                        "export_type": "EXCEL",
+                        "export_format": "XLSX",
+                        "file_size_bytes": len(excel_bytes),
+                        "fields_exported": list(extracted_dict.keys())
+                    }).execute()
+                except:
+                    pass
+                
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download Excel",
+                    data=excel_bytes,
+                    file_name=f"LeaseAbstract_{lease_id}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+                st.success("✅ Excel workbook generated! Includes Summary, Fields, and Critical Dates sheets.")
+                
+            except Exception as e:
+                st.error(f"Failed to generate Excel export: {str(e)}")
 
     st.markdown("---")
 
