@@ -189,6 +189,93 @@ if page == "📋 Lease Dashboard":
             </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Bulk Export Actions
+    if leases:
+        st.markdown("### 📦 Bulk Export Actions")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📊 Export All to Yardi CSV", use_container_width=True):
+                try:
+                    from bulk_export import export_all_leases_to_yardi
+                    
+                    # Fetch all fields for all leases
+                    all_fields = {}
+                    for lease in leases:
+                        fields_response = sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
+                        all_fields[lease['id']] = fields_response.data or []
+                    
+                    # Generate bulk CSV
+                    csv_bytes = export_all_leases_to_yardi(leases, all_fields)
+                    
+                    # Log export
+                    try:
+                        sb.table("export_history").insert({
+                            "user_id": st.session_state.get("user_id"),
+                            "export_type": "YARDI_CSV_BULK",
+                            "export_format": "CSV",
+                            "file_size_bytes": len(csv_bytes),
+                            "date_range": {"count": len(leases)}
+                        }).execute()
+                    except:
+                        pass
+                    
+                    # Offer download
+                    st.download_button(
+                        label=f"⬇️ Download All {len(leases)} Leases (Yardi CSV)",
+                        data=csv_bytes,
+                        file_name=f"Yardi_All_Leases_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    st.success(f"✅ Exported {len(leases)} leases to Yardi format!")
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+        
+        with col2:
+            if st.button("📊 Export All to MRI CSV", use_container_width=True):
+                try:
+                    from bulk_export import export_all_leases_to_mri
+                    
+                    # Fetch all fields for all leases
+                    all_fields = {}
+                    for lease in leases:
+                        fields_response = sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
+                        all_fields[lease['id']] = fields_response.data or []
+                    
+                    # Generate bulk CSV
+                    csv_bytes = export_all_leases_to_mri(leases, all_fields)
+                    
+                    # Log export
+                    try:
+                        sb.table("export_history").insert({
+                            "user_id": st.session_state.get("user_id"),
+                            "export_type": "MRI_CSV_BULK",
+                            "export_format": "CSV",
+                            "file_size_bytes": len(csv_bytes),
+                            "date_range": {"count": len(leases)}
+                        }).execute()
+                    except:
+                        pass
+                    
+                    # Offer download
+                    st.download_button(
+                        label=f"⬇️ Download All {len(leases)} Leases (MRI CSV)",
+                        data=csv_bytes,
+                        file_name=f"MRI_All_Leases_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    st.success(f"✅ Exported {len(leases)} leases to MRI format!")
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+        
+        with col3:
+            if st.button("📦 Bulk Upload", use_container_width=True):
+                st.switch_page("pages/9_📦_Bulk_Upload.py")
+        
+        st.markdown("---")
 
     if not leases:
         st.info("No leases processed yet. Use **Process New Lease** to get started.")
