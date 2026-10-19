@@ -297,7 +297,7 @@ elif page == "🔍 Review a Lease":
     # Professional Report Actions
     st.subheader("📄 Professional Reports")
     
-    col_pdf, col_email, col_placeholder = st.columns([1, 1, 2])
+    col_pdf, col_email, col_yardi, col_mri = st.columns([1, 1, 1, 1])
     
     with col_pdf:
         if st.button("📥 Generate PDF Report", use_container_width=True, type="primary"):
@@ -343,6 +343,66 @@ elif page == "🔍 Review a Lease":
                     
             except Exception as e:
                 st.error(f"Failed to send email: {str(e)}")
+    
+    with col_yardi:
+        if st.button("📊 Export to Yardi", use_container_width=True):
+            try:
+                from pms_export import export_to_yardi
+                
+                # Prepare extracted fields dictionary
+                extracted_dict = {}
+                for field in fields:
+                    field_name = field.get("field_name", "Unknown")
+                    extracted_dict[field_name] = {
+                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                        "confidence": field.get("confidence", "MEDIUM")
+                    }
+                
+                # Generate Yardi CSV
+                csv_bytes = export_to_yardi(lease, extracted_dict)
+                
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download Yardi CSV",
+                    data=csv_bytes,
+                    file_name=f"Yardi_Lease_{lease_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("✅ Yardi CSV generated!")
+                
+            except Exception as e:
+                st.error(f"Failed to generate Yardi export: {str(e)}")
+    
+    with col_mri:
+        if st.button("📊 Export to MRI", use_container_width=True):
+            try:
+                from pms_export import export_to_mri
+                
+                # Prepare extracted fields dictionary
+                extracted_dict = {}
+                for field in fields:
+                    field_name = field.get("field_name", "Unknown")
+                    extracted_dict[field_name] = {
+                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
+                        "confidence": field.get("confidence", "MEDIUM")
+                    }
+                
+                # Generate MRI CSV
+                csv_bytes = export_to_mri(lease, extracted_dict)
+                
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download MRI CSV",
+                    data=csv_bytes,
+                    file_name=f"MRI_Lease_{lease_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("✅ MRI CSV generated!")
+                
+            except Exception as e:
+                st.error(f"Failed to generate MRI export: {str(e)}")
 
     st.markdown("---")
 
