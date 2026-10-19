@@ -121,9 +121,8 @@ class GenericExcelExporter:
         # Sheet 2: All Extracted Fields
         GenericExcelExporter._create_fields_sheet(wb, extracted_fields)
         
-        # Sheet 3: ASC 842 Calculations (if available)
-        if asc842_data:
-            GenericExcelExporter._create_asc842_sheet(wb, asc842_data)
+        # Sheet 3: ASC 842 Calculations (always create, placeholder if no data)
+        GenericExcelExporter._create_asc842_sheet(wb, asc842_data)
         
         # Sheet 4: Critical Dates
         GenericExcelExporter._create_critical_dates_sheet(wb, extracted_fields)
@@ -237,7 +236,7 @@ class GenericExcelExporter:
             row += 1
     
     @staticmethod
-    def _create_asc842_sheet(wb: 'Workbook', asc842_data: Dict):
+    def _create_asc842_sheet(wb: 'Workbook', asc842_data: Optional[Dict]):
         """Create Sheet 3: ASC 842 Calculations"""
         from openpyxl.styles import Font, PatternFill, Alignment
         
@@ -251,6 +250,24 @@ class GenericExcelExporter:
         ws.merge_cells('A1:B1')
         
         row = 3
+        
+        # If no ASC 842 data, show placeholder
+        if not asc842_data:
+            ws['A3'] = 'ASC 842 calculations not yet performed for this lease.'
+            ws['A3'].font = Font(italic=True, color='8892b0')
+            ws.merge_cells('A3:B3')
+            
+            ws['A5'] = 'To generate ASC 842 calculations:'
+            ws['A5'].font = Font(bold=True)
+            
+            ws['A6'] = '1. Go to ASC 842 Dashboard in LeaseAI'
+            ws['A7'] = '2. Select this lease and run calculations'
+            ws['A8'] = '3. Re-export to Excel to include the results'
+            
+            ws.merge_cells('A6:B6')
+            ws.merge_cells('A7:B7')
+            ws.merge_cells('A8:B8')
+            return
         
         # Key metrics
         metrics = [
