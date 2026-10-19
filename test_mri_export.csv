@@ -1,0 +1,2 @@
+Property_ID,Building_ID,Unit_ID,Tenant_ID,Tenant_Name,Lease_Start,Lease_Expiration,Monthly_Rent,Annual_Rent,Square_Feet,Rent_PSF,Security_Deposit,Lease_Type,Use_Code,Escalation_Type,Escalation_Percent,Operating_Expense_Base,Operating_Expense_Method,Renewal_Option_Count,Notice_Days,Tenant_Improvement_Allowance,Free_Rent_Months,Status
+"123 Main Street, Vancouver BC",Main Street Tower,Suite 200,ACME001,Acme Corporation,2024-01-01,2029-12-31,5000,60000.0,2500,24.00,10000,Net Lease,Office,Fixed,3%,12000,Pro Rata,2,180,25000,2,APPROVED

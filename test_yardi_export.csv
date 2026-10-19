@@ -1,0 +1,2 @@
+PropertyCode,UnitCode,TenantCode,TenantName,LeaseStartDate,LeaseEndDate,RentAmount,RentFrequency,SecurityDeposit,SquareFootage,UseType,EscalationType,EscalationRate,CAMCharges,CAMMethod,RenewalOptions,NoticeRequired,LeaseType,Status
+"123 Main Street, Vancouver BC",Suite 200,ACME001,Acme Corporation,01/01/2024,12/31/2029,5000,Monthly,10000,2500,Office,Fixed,3%,500,Pro Rata,2,6 months,Net Lease,APPROVED
