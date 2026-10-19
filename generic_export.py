@@ -269,16 +269,28 @@ class GenericExcelExporter:
             ws.merge_cells('A8:B8')
             return
         
-        # Key metrics
+        # Key metrics - using actual database field names
+        # Format currency values
+        initial_rou_asset = asc842_data.get('initial_rou_asset', 'N/A')
+        if isinstance(initial_rou_asset, (int, float)):
+            initial_rou_asset = f"${initial_rou_asset:,.2f}"
+        
+        initial_liability = asc842_data.get('initial_liability', 'N/A')
+        if isinstance(initial_liability, (int, float)):
+            initial_liability = f"${initial_liability:,.2f}"
+        
+        discount_rate = asc842_data.get('discount_rate', 'N/A')
+        if isinstance(discount_rate, (int, float)):
+            discount_rate = f"{discount_rate}%"
+        
         metrics = [
-            ('Lease Classification', asc842_data.get('classification', 'N/A')),
-            ('Present Value of Lease Payments', asc842_data.get('present_value', 'N/A')),
-            ('Incremental Borrowing Rate', asc842_data.get('discount_rate', 'N/A')),
-            ('ROU Asset (Initial)', asc842_data.get('rou_asset', 'N/A')),
-            ('Lease Liability (Initial)', asc842_data.get('lease_liability', 'N/A')),
-            ('', ''),
-            ('Total Lease Payments', asc842_data.get('total_payments', 'N/A')),
+            ('Lease Classification', asc842_data.get('lease_classification', 'N/A')),
+            ('ROU Asset (Initial)', initial_rou_asset),
+            ('Lease Liability (Initial)', initial_liability),
+            ('Incremental Borrowing Rate', discount_rate),
             ('Lease Term (months)', asc842_data.get('lease_term_months', 'N/A')),
+            ('', ''),
+            ('Calculation Date', asc842_data.get('calculation_date', 'N/A')[:10] if asc842_data.get('calculation_date') else 'N/A'),
         ]
         
         for label, value in metrics:
