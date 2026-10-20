@@ -135,19 +135,58 @@ with tab1:
             st.markdown(f"<p style='text-align: center;'><b>{report['health_status']}</b></p>", unsafe_allow_html=True)
         
         with col3:
-            if st.button("🔄 Refresh Report", use_container_width=True):
-                with st.spinner("Regenerating report..."):
-                    try:
-                        from health_report_generator import generate_health_report
-                        from anomaly_detection_engine import scan_portfolio_for_anomalies
-                        
-                        openai_key = st.secrets.get("OPENAI_API_KEY")
-                        scan_portfolio_for_anomalies(sb, client_id)
-                        generate_health_report(sb, openai_key, client_id)
-                        st.success("Report refreshed!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+            col3a, col3b = st.columns(2)
+            
+            with col3a:
+                if st.button("🔄 Refresh", use_container_width=True):
+                    with st.spinner("Regenerating report..."):
+                        try:
+                            from health_report_generator import generate_health_report
+                            from anomaly_detection_engine import scan_portfolio_for_anomalies
+                            
+                            openai_key = st.secrets.get("OPENAI_API_KEY")
+                            scan_portfolio_for_anomalies(sb, client_id)
+                            generate_health_report(sb, openai_key, client_id)
+                            st.success("Report refreshed!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+            
+            with col3b:
+                if st.button("📄 PDF", use_container_width=True):
+                    with st.spinner("Generating PDF..."):
+                        try:
+                            from health_report_pdf import generate_health_report_pdf
+                            import tempfile
+                            
+                            # Get actions for this report
+                            actions_response = sb.table("health_report_actions").select("*").eq("health_report_id", report['id']).order("priority").execute()
+                            actions = actions_response.data if actions_response.data else []
+                            
+                            # Generate PDF in temp file
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                                pdf_path = tmp.name
+                            
+                            generate_health_report_pdf(report, actions, pdf_path)
+                            
+                            # Read PDF and offer download
+                            with open(pdf_path, 'rb') as f:
+                                pdf_bytes = f.read()
+                            
+                            st.download_button(
+                                label="💾 Download Report",
+                                data=pdf_bytes,
+                                file_name=f"health_report_{report['report_date']}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                            
+                            # Cleanup temp file
+                            import os
+                            os.remove(pdf_path)
+                            
+                        except Exception as e:
+                            st.error(f"Error generating PDF: {str(e)}")
         
         st.markdown("---")
         

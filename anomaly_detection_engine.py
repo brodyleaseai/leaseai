@@ -93,6 +93,8 @@ class AnomalyDetectionEngine:
             anomalies.extend(self._check_confidence_scores(lease))
             anomalies.extend(self._check_missing_data(lease))
             anomalies.extend(self._check_rent_escalation(lease))
+            anomalies.extend(self._check_cam_charge_trends(lease))
+            anomalies.extend(self._check_asc842_compliance(lease))
             
             # Save anomalies to database
             for anomaly in anomalies:
@@ -425,6 +427,155 @@ class AnomalyDetectionEngine:
         
         self.sb.table("lease_anomalies").update(update_data).eq("id", anomaly_id).execute()
         print(f"✅ Anomaly {anomaly_id} marked as resolved")
+    
+    def _check_cam_charge_trends(self, lease: Dict) -> List[Dict]:
+        """
+        Check for unusual CAM charge trends (year-over-year)
+        Phase 6 Session 2 Enhancement
+        """
+        anomalies = []
+        
+        try:
+            # Get CAM reconciliations for this lease
+            recons_response = self.sb.table("cam_reconciliations").select("*").eq("lease_id", lease['id']).order("reconciliation_date", desc=True).limit(2).execute()
+            
+            recons = recons_response.data if recons_response.data else []
+            
+            if len(recons) < 2:
+                # Need at least 2 years of data to detect trends
+                return anomalies
+            
+            # Get most recent and previous year
+            current = recons[0]
+            previous = recons[1]
+            
+            # Calculate year-over-year variance
+            current_total = float(current.get('landlord_billed_amount', 0) or 0)
+            previous_total = float(previous.get('landlord_billed_amount', 0) or 0)
+            
+            if previous_total > 0:
+                variance_pct = ((current_total - previous_total) / previous_total) * 100
+                variance_amount = current_total - previous_total
+                
+                # Flag if CAM charges increased by more than 15% YoY
+                if variance_pct > 15:
+                    anomalies.append({
+                        'anomaly_type': 'CAM_CHARGE_SPIKE',
+                        'severity': 'HIGH' if variance_pct > 25 else 'MEDIUM',
+                        'title': f'CAM charges increased {variance_pct:.1f}% year-over-year',
+                        'description': f'CAM charges rose from ${previous_total:,.2f} to ${current_total:,.2f} (${variance_amount:,.2f} increase). This {variance_pct:.1f}% increase exceeds typical market trends and should be audited.',
+                        'field_name': 'CAM Reconciliation',
+                        'expected_value': f'< 15% increase (${previous_total * 1.15:,.2f})',
+                        'actual_value': f'{variance_pct:.1f}% increase (${current_total:,.2f})'
+                    })
+                
+                # Flag if CAM charges decreased significantly (possible under-billing or error)
+                elif variance_pct < -15:
+                    anomalies.append({
+                        'anomaly_type': 'CAM_CHARGE_DROP',
+                        'severity': 'MEDIUM',
+                        'title': f'CAM charges decreased {abs(variance_pct):.1f}% year-over-year',
+                        'description': f'CAM charges dropped from ${previous_total:,.2f} to ${current_total:,.2f}. Verify this is correct and not a billing error.',
+                        'field_name': 'CAM Reconciliation',
+                        'expected_value': f'Within 15% of ${previous_total:,.2f}',
+                        'actual_value': f'{variance_pct:.1f}% decrease (${current_total:,.2f})'
+                    })
+        
+        except Exception as e:
+            # Silently skip if error - don't fail entire scan
+            pass
+        
+        return anomalies
+    
+    def _check_asc842_compliance(self, lease: Dict) -> List[Dict]:
+        """
+        Check for ASC 842 compliance gaps
+        Phase 6 Session 2 Enhancement
+        """
+        anomalies = []
+        
+        # ASC 842 requires specific fields to be captured
+        required_fields_asc842 = [
+            'Lease Commencement Date',
+            'Lease Expiration Date',
+            'Base Rent Year 1 (monthly)',
+            'Premises Square Footage (RSF)',
+            'Annual Escalation Rate or Cap',
+            'Tenant Improvement Allowance',
+            'Security Deposit Amount'
+        ]
+        
+        # Get extracted fields for this lease
+        fields_response = self.sb.table("extracted_fields").select("*").eq("lease_id", lease['id']).execute()
+        fields_dict = {f['field_name']: f for f in (fields_response.data or [])}
+        
+        missing_asc842 = []
+        low_confidence_asc842 = []
+        
+        for field_name in required_fields_asc842:
+            if field_name not in fields_dict:
+                missing_asc842.append(field_name)
+            else:
+                field_data = fields_dict[field_name]
+                value = field_data.get('reviewed_value') or field_data.get('raw_value', '')
+                confidence = field_data.get('confidence', 'LOW')
+                
+                # Check if value is missing or marked as NOT FOUND
+                if not value or value.upper() in ['NOT FOUND', 'N/A', 'NONE', '']:
+                    missing_asc842.append(field_name)
+                # Check if confidence is low
+                elif confidence == 'LOW':
+                    low_confidence_asc842.append(field_name)
+        
+        # Flag if critical ASC 842 fields are missing
+        if len(missing_asc842) >= 3:
+            anomalies.append({
+                'anomaly_type': 'ASC842_COMPLIANCE_GAP',
+                'severity': 'HIGH',
+                'title': f'ASC 842 compliance gap: {len(missing_asc842)} required fields missing',
+                'description': f'This lease is missing critical ASC 842 required fields: {", ".join(missing_asc842[:5])}{"..." if len(missing_asc842) > 5 else ""}. Complete abstraction required for GAAP compliance.',
+                'field_name': None,
+                'expected_value': 'All ASC 842 required fields present',
+                'actual_value': f'{len(missing_asc842)} fields missing'
+            })
+        
+        # Flag if multiple ASC 842 fields have low confidence
+        if len(low_confidence_asc842) >= 3:
+            anomalies.append({
+                'anomaly_type': 'ASC842_LOW_CONFIDENCE',
+                'severity': 'MEDIUM',
+                'title': f'ASC 842 fields need verification: {len(low_confidence_asc842)} low confidence fields',
+                'description': f'ASC 842 required fields with low confidence: {", ".join(low_confidence_asc842[:5])}. Manual review recommended for audit readiness.',
+                'field_name': None,
+                'expected_value': 'High confidence on ASC 842 fields',
+                'actual_value': f'{len(low_confidence_asc842)} low confidence fields'
+            })
+        
+        # Check for missing discount rate (required for ROU asset calculation)
+        if 'Discount Rate' not in fields_dict or not fields_dict.get('Discount Rate', {}).get('reviewed_value'):
+            # Only flag if lease is active and relatively new (< 2 years old)
+            if lease.get('status') in ['ACTIVE', 'PENDING_RENEWAL']:
+                try:
+                    commencement = fields_dict.get('Lease Commencement Date', {})
+                    comm_date_str = commencement.get('reviewed_value') or commencement.get('raw_value')
+                    if comm_date_str and comm_date_str != 'NOT FOUND':
+                        comm_date = self._parse_date(comm_date_str)
+                        if comm_date:
+                            years_since_commencement = (datetime.now().date() - comm_date).days / 365.25
+                            if years_since_commencement < 2:
+                                anomalies.append({
+                                    'anomaly_type': 'ASC842_MISSING_DISCOUNT_RATE',
+                                    'severity': 'MEDIUM',
+                                    'title': 'Missing discount rate for ROU asset calculation',
+                                    'description': 'ASC 842 requires a discount rate (incremental borrowing rate) to calculate the Right-of-Use (ROU) asset. This field is missing.',
+                                    'field_name': 'Discount Rate',
+                                    'expected_value': 'Discount rate present',
+                                    'actual_value': 'Missing'
+                                })
+                except:
+                    pass
+        
+        return anomalies
 
 
 # Convenience functions
