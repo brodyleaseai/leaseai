@@ -887,16 +887,141 @@ with tab3:
                 col_a, col_b, col_c = st.columns(3)
                 
                 with col_a:
-                    if st.button("📄 View Details", key=f"detail_{recon['id']}"):
-                        st.info("Detailed view coming in Phase 2B")
+                    if st.button("📝 Update Status", key=f"status_{recon['id']}", use_container_width=True):
+                        # Show status update form
+                        st.session_state[f'show_status_form_{recon["id"]}'] = True
                 
                 with col_b:
-                    if st.button("📝 Generate Dispute Letter", key=f"dispute_{recon['id']}"):
-                        st.info("Dispute letter generation coming in Phase 2B")
+                    if st.button("📧 Dispute Letter", key=f"dispute_{recon['id']}", use_container_width=True):
+                        try:
+                            from cam_engine import generate_cam_dispute_letter
+                            
+                            # Get lease data
+                            lease_res = sb.table("leases").select("*").eq("id", recon.get('lease_id')).execute()
+                            lease_data = lease_res.data[0] if lease_res.data else {}
+                            
+                            # Generate letter
+                            letter_text = generate_cam_dispute_letter(lease_data, recon, [])
+                            
+                            st.download_button(
+                                label="⬇️ Download Dispute Letter",
+                                data=letter_text,
+                                file_name=f"Dispute_Letter_{recon.get('reconciliation_year')}.txt",
+                                mime="text/plain",
+                                key=f"dl_dispute_{recon['id']}"
+                            )
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
                 
                 with col_c:
-                    if st.button("📊 Download Report", key=f"report_{recon['id']}"):
-                        st.info("PDF report generation coming in Phase 2B")
+                    if st.button("📄 PDF Report", key=f"report_{recon['id']}", use_container_width=True):
+                        try:
+                            from cam_pdf_report import generate_cam_pdf_report
+                            
+                            # Get all data
+                            lease_res = sb.table("leases").select("*").eq("id", recon.get('lease_id')).execute()
+                            lease_data = lease_res.data[0] if lease_res.data else {}
+                            
+                            cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", recon.get('lease_id')).execute()
+                            cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+                            
+                            # Get line items if available
+                            line_items_res = sb.table("cam_line_items").select("*").eq("reconciliation_id", recon['id']).execute()
+                            line_items = line_items_res.data if line_items_res.data else []
+                            
+                            # Generate PDF
+                            pdf_bytes = generate_cam_pdf_report(lease_data, recon, line_items, cam_prov)
+                            
+                            property_name = lease_data.get('property_address', 'Property').replace(' ', '_')[:30]
+                            filename = f"CAM_Report_{property_name}_{recon.get('reconciliation_year')}.pdf"
+                            
+                            st.download_button(
+                                label="⬇️ Download PDF",
+                                data=pdf_bytes,
+                                file_name=filename,
+                                mime="application/pdf",
+                                key=f"dl_pdf_{recon['id']}"
+                            )
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                
+                # Status update form (if triggered)
+                if st.session_state.get(f'show_status_form_{recon["id"]}', False):
+                    st.markdown("---")
+                    st.markdown("#### Update Reconciliation Status")
+                    
+                    new_status = st.selectbox(
+                        "New Status",
+                        options=["DRAFT", "UNDER_REVIEW", "DISCREPANCY_FOUND", "DISPUTE_FILED", "RESOLVED", "ACCEPTED"],
+                        index=0,
+                        key=f"status_select_{recon['id']}"
+                    )
+                    
+                    new_dispute_status = st.selectbox(
+                        "Dispute Status",
+                        options=["NOT_DISPUTED", "CHALLENGE_DRAFTED", "CHALLENGE_SENT", "AWAITING_RESPONSE", "UNDER_NEGOTIATION", "RESOLVED", "ESCALATED"],
+                        index=0,
+                        key=f"dispute_select_{recon['id']}"
+                    )
+                    
+                    notes = st.text_area(
+                        "Add Notes (optional)",
+                        key=f"notes_{recon['id']}",
+                        placeholder="Record any updates, communications, or next steps..."
+                    )
+                    
+                    col_save, col_cancel = st.columns(2)
+                    
+                    with col_save:
+                        if st.button("💾 Save Update", key=f"save_update_{recon['id']}", use_container_width=True, type="primary"):
+                            try:
+                                # Update reconciliation
+                                update_data = {
+                                    'status': new_status,
+                                    'dispute_status': new_dispute_status
+                                }
+                                
+                                sb.table("cam_reconciliations").update(update_data).eq("id", recon['id']).execute()
+                                
+                                # Add to dispute history if notes provided
+                                if notes:
+                                    history_entry = {
+                                        'reconciliation_id': recon['id'],
+                                        'action': f"Status updated to {new_status}",
+                                        'notes': notes,
+                                        'performed_by': st.session_state.get('user_id', 'system'),
+                                        'performed_at': datetime.now().isoformat()
+                                    }
+                                    sb.table("cam_dispute_history").insert(history_entry).execute()
+                                
+                                st.success("✅ Status updated successfully!")
+                                st.balloons()
+                                
+                                # Clear form state
+                                st.session_state[f'show_status_form_{recon["id"]}'] = False
+                                
+                                # Refresh
+                                st.rerun()
+                            
+                            except Exception as e:
+                                st.error(f"Update error: {str(e)}")
+                    
+                    with col_cancel:
+                        if st.button("❌ Cancel", key=f"cancel_update_{recon['id']}", use_container_width=True):
+                            st.session_state[f'show_status_form_{recon["id"]}'] = False
+                            st.rerun()
+                
+                # Show dispute history
+                history_res = sb.table("cam_dispute_history").select("*").eq("reconciliation_id", recon['id']).order("performed_at", desc=True).execute()
+                
+                if history_res.data:
+                    st.markdown("---")
+                    st.markdown("**📜 Communication History:**")
+                    
+                    for entry in history_res.data[:5]:  # Show latest 5
+                        action_date = entry.get('performed_at', '')[:10] if entry.get('performed_at') else 'Unknown date'
+                        st.markdown(f"- **{action_date}**: {entry.get('action', 'No action')} - {entry.get('notes', '')}")
+
 
 st.markdown("---")
 st.markdown('<span style="font-size:0.75rem; color:#555;">LeaseAI CAM Reconciliation v1.0 — Phase 2A</span>', unsafe_allow_html=True)
