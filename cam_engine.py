@@ -515,6 +515,16 @@ def calculate_cam_charges(total_charges: float, provisions: Dict) -> Dict:
     return CAMCalculationEngine.calculate_tenant_share(total_charges, provisions)
 
 
+def analyze_line_items(line_items: List[Dict], cam_provisions: Dict) -> List[Dict]:
+    """Quick line item analysis"""
+    return CAMCalculationEngine.analyze_line_items(line_items, cam_provisions)
+
+
+def detect_discrepancies(landlord_total: float, calculated_total: float, line_items: List[Dict]) -> Dict:
+    """Quick discrepancy detection"""
+    return CAMCalculationEngine.detect_discrepancies(landlord_total, calculated_total, line_items)
+
+
 def generate_cam_dispute_letter(lease_data: Dict, reconciliation: Dict, items: List[Dict]) -> str:
     """Quick dispute letter generation"""
     return CAMDisputeLetter.generate_dispute_letter(lease_data, reconciliation, items)
