@@ -574,6 +574,204 @@ with tab2:
             
             st.markdown("---")
             
+            # Line-by-line variance analysis (if line items available)
+            if 'parsed_cam_statement' in st.session_state:
+                parsed_data = st.session_state['parsed_cam_statement']
+                line_items = parsed_data.get('line_items', [])
+                
+                if line_items:
+                    st.markdown("### 🔍 Line-by-Line Variance Analysis")
+                    
+                    # Analyze each line item
+                    import pandas as pd
+                    from cam_engine import analyze_line_items
+                    
+                    # Get CAM provisions for exclusion checking
+                    cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", results['lease_id']).execute()
+                    cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+                    
+                    # Analyze line items
+                    analyzed_items = analyze_line_items(line_items, cam_prov)
+                    
+                    # Create detailed DataFrame
+                    df_items = pd.DataFrame(analyzed_items)
+                    
+                    # Add status indicator
+                    def get_status(row):
+                        variance = abs(row.get('variance', 0))
+                        if variance < 50:
+                            return '✅ OK'
+                        elif variance < 200:
+                            return '⚠️ Review'
+                        else:
+                            return '🚨 Challenge'
+                    
+                    if not df_items.empty and 'variance' in df_items.columns:
+                        df_items['Status'] = df_items.apply(get_status, axis=1)
+                        
+                        # Format amount columns
+                        if 'amount' in df_items.columns:
+                            df_items['Amount'] = df_items['amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                        if 'variance' in df_items.columns:
+                            df_items['Variance'] = df_items['variance'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "-")
+                        
+                        # Select display columns
+                        display_cols = []
+                        for col in ['line_number', 'description', 'category', 'Amount', 'Variance', 'Status', 'notes']:
+                            if col in df_items.columns:
+                                display_cols.append(col)
+                        
+                        if display_cols:
+                            # Color-code rows based on variance
+                            def highlight_variance(row):
+                                variance = row.get('variance', 0) if 'variance' in df_items.columns else 0
+                                if abs(variance) < 50:
+                                    return ['background-color: #d4edda'] * len(row)
+                                elif abs(variance) < 200:
+                                    return ['background-color: #fff3cd'] * len(row)
+                                else:
+                                    return ['background-color: #f8d7da'] * len(row)
+                            
+                            # Display styled table
+                            st.dataframe(
+                                df_items[display_cols].style.apply(highlight_variance, axis=1) if 'variance' in df_items.columns else df_items[display_cols],
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        else:
+                            st.dataframe(df_items, use_container_width=True, hide_index=True)
+                    else:
+                        st.dataframe(df_items, use_container_width=True, hide_index=True)
+                    
+                    # Summary of flagged items
+                    flagged = [item for item in analyzed_items if item.get('should_challenge', False)]
+                    if flagged:
+                        st.warning(f"🚨 **{len(flagged)} line items flagged for review:**")
+                        for item in flagged[:5]:  # Show first 5
+                            st.write(f"- {item.get('description', 'Unknown')} (${item.get('amount', 0):,.2f}) - {item.get('notes', 'No notes')}")
+            
+            st.markdown("---")
+            
+            # Action buttons row
+            col_action1, col_action2, col_action3 = st.columns(3)
+            
+            with col_action1:
+                if st.button("📄 Generate PDF Report", use_container_width=True, type="secondary"):
+                    with st.spinner("Generating professional PDF report..."):
+                        try:
+                            from cam_pdf_report import generate_cam_pdf_report
+                            
+                            # Get all required data
+                            lease_res = sb.table("leases").select("*").eq("id", results['lease_id']).execute()
+                            lease_data = lease_res.data[0] if lease_res.data else {}
+                            
+                            cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", results['lease_id']).execute()
+                            cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+                            
+                            # Get line items if available
+                            line_items = []
+                            if 'parsed_cam_statement' in st.session_state:
+                                line_items = st.session_state['parsed_cam_statement'].get('line_items', [])
+                            
+                            # Build reconciliation dict
+                            recon_data = {
+                                'reconciliation_year': results['recon_year'],
+                                'statement_date': results['statement_date'].isoformat(),
+                                'landlord_total_charges': results['landlord_total'],
+                                'landlord_tenant_share': results['tenant_share_billed'],
+                                'calculated_total_charges': results['landlord_total'],
+                                'calculated_tenant_share': results['calculated_share'],
+                                'variance_amount': results['variance'],
+                                'variance_percentage': results['variance_percentage']
+                            }
+                            
+                            # Generate PDF
+                            pdf_bytes = generate_cam_pdf_report(
+                                lease_data,
+                                recon_data,
+                                line_items,
+                                cam_prov
+                            )
+                            
+                            # Offer download
+                            property_name = lease_data.get('property_address', 'Property').replace(' ', '_')[:30]
+                            filename = f"CAM_Reconciliation_{property_name}_{results['recon_year']}.pdf"
+                            
+                            st.download_button(
+                                label="⬇️ Download PDF Report",
+                                data=pdf_bytes,
+                                file_name=filename,
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                            
+                            st.success("✅ PDF report generated!")
+                        
+                        except Exception as e:
+                            st.error(f"PDF generation error: {str(e)}")
+            
+            with col_action2:
+                if st.button("📧 Generate Dispute Letter", use_container_width=True, type="secondary"):
+                    if abs(results['variance']) > 100:
+                        try:
+                            from cam_engine import generate_cam_dispute_letter
+                            
+                            # Get lease data
+                            lease_res = sb.table("leases").select("*").eq("id", results['lease_id']).execute()
+                            lease_data = lease_res.data[0] if lease_res.data else {}
+                            
+                            # Get line items
+                            line_items = []
+                            if 'parsed_cam_statement' in st.session_state:
+                                from cam_engine import analyze_line_items
+                                cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", results['lease_id']).execute()
+                                cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+                                
+                                parsed_items = st.session_state['parsed_cam_statement'].get('line_items', [])
+                                line_items = analyze_line_items(parsed_items, cam_prov)
+                                
+                                # Only disputed items
+                                line_items = [item for item in line_items if item.get('should_challenge', False)]
+                            
+                            # Build recon dict
+                            recon_data = {
+                                'reconciliation_year': results['recon_year'],
+                                'variance_amount': results['variance'],
+                                'landlord_tenant_share': results['tenant_share_billed'],
+                                'calculated_tenant_share': results['calculated_share']
+                            }
+                            
+                            # Generate letter
+                            letter_text = generate_cam_dispute_letter(lease_data, recon_data, line_items)
+                            
+                            # Display in expander
+                            with st.expander("📧 View Dispute Letter", expanded=True):
+                                st.text_area(
+                                    "Dispute Letter (Copy & Paste)",
+                                    value=letter_text,
+                                    height=400,
+                                    key="dispute_letter_text"
+                                )
+                                
+                                st.download_button(
+                                    label="⬇️ Download as .txt",
+                                    data=letter_text,
+                                    file_name=f"CAM_Dispute_Letter_{results['recon_year']}.txt",
+                                    mime="text/plain"
+                                )
+                            
+                            st.success("✅ Dispute letter generated!")
+                        
+                        except Exception as e:
+                            st.error(f"Letter generation error: {str(e)}")
+                    else:
+                        st.info("💡 Variance is minor (< $100). Dispute letter not needed.")
+            
+            with col_action3:
+                pass  # Reserved for future action button
+            
+            st.markdown("---")
+            
             # Save button (now outside the Calculate button's block!)
             if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary", key="save_recon"):
                 try:
