@@ -37,54 +37,56 @@ class CAMReconciliationPDFReport:
     def _create_custom_styles(self):
         """Create custom paragraph styles"""
         
-        # Title style
-        self.styles.add(ParagraphStyle(
-            name='CustomTitle',
-            parent=self.styles['Heading1'],
-            fontSize=20,
-            textColor=colors.HexColor('#1f4788'),
-            spaceAfter=30,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        ))
+        # Only add styles if they don't already exist
+        if 'CustomTitle' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='CustomTitle',
+                parent=self.styles['Heading1'],
+                fontSize=20,
+                textColor=colors.HexColor('#1f4788'),
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                fontName='Helvetica-Bold'
+            ))
         
-        # Section header
-        self.styles.add(ParagraphStyle(
-            name='SectionHeader',
-            parent=self.styles['Heading2'],
-            fontSize=14,
-            textColor=colors.HexColor('#1f4788'),
-            spaceAfter=12,
-            spaceBefore=12,
-            fontName='Helvetica-Bold'
-        ))
+        if 'SectionHeader' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='SectionHeader',
+                parent=self.styles['Heading2'],
+                fontSize=14,
+                textColor=colors.HexColor('#1f4788'),
+                spaceAfter=12,
+                spaceBefore=12,
+                fontName='Helvetica-Bold'
+            ))
         
-        # Subsection
-        self.styles.add(ParagraphStyle(
-            name='SubsectionHeader',
-            parent=self.styles['Heading3'],
-            fontSize=12,
-            textColor=colors.HexColor('#2c5aa0'),
-            spaceAfter=8,
-            fontName='Helvetica-Bold'
-        ))
+        if 'SubsectionHeader' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='SubsectionHeader',
+                parent=self.styles['Heading3'],
+                fontSize=12,
+                textColor=colors.HexColor('#2c5aa0'),
+                spaceAfter=8,
+                fontName='Helvetica-Bold'
+            ))
         
-        # Body text
-        self.styles.add(ParagraphStyle(
-            name='BodyText',
-            parent=self.styles['Normal'],
-            fontSize=10,
-            leading=14,
-            alignment=TA_JUSTIFY
-        ))
+        # Use custom name to avoid conflict with built-in BodyText
+        if 'CAMBodyText' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='CAMBodyText',
+                parent=self.styles['Normal'],
+                fontSize=10,
+                leading=14,
+                alignment=TA_JUSTIFY
+            ))
         
-        # Summary box
-        self.styles.add(ParagraphStyle(
-            name='SummaryText',
-            fontSize=11,
-            leading=16,
-            textColor=colors.black
-        ))
+        if 'SummaryText' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='SummaryText',
+                fontSize=11,
+                leading=16,
+                textColor=colors.black
+            ))
     
     def generate_report(
         self,
@@ -242,7 +244,7 @@ class CAMReconciliationPDFReport:
         else:
             recommendation = f"Significant ${abs(variance):,.2f} variance detected. Strongly recommend disputing the charges and conducting a thorough audit. See detailed analysis on following pages."
         
-        elements.append(Paragraph(recommendation, self.styles['BodyText']))
+        elements.append(Paragraph(recommendation, self.styles['CAMBodyText']))
         
         return elements
     
@@ -320,7 +322,7 @@ class CAMReconciliationPDFReport:
             findings.append("• No significant issues identified")
         
         for finding in findings:
-            elements.append(Paragraph(finding, self.styles['BodyText']))
+            elements.append(Paragraph(finding, self.styles['CAMBodyText']))
             elements.append(Spacer(1, 0.1*inch))
         
         return elements
@@ -333,7 +335,7 @@ class CAMReconciliationPDFReport:
         elements.append(Spacer(1, 0.2*inch))
         
         if not line_items:
-            elements.append(Paragraph("No line items available.", self.styles['BodyText']))
+            elements.append(Paragraph("No line items available.", self.styles['CAMBodyText']))
             return elements
         
         # Build table data
