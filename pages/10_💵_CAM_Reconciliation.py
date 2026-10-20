@@ -75,11 +75,20 @@ def fetch_cam_provisions(lease_id):
 
 def fetch_cam_reconciliations(lease_id=None):
     """Fetch CAM reconciliations, optionally filtered by lease"""
-    query = sb.table("cam_reconciliations").select("*, leases(property_address, tenant_name)")
-    if lease_id:
-        query = query.eq("lease_id", lease_id)
-    res = query.order("reconciliation_year", desc=True).execute()
-    return res.data or []
+    try:
+        query = sb.table("cam_reconciliations").select("*, leases(property_address, tenant_name)")
+        if lease_id:
+            query = query.eq("lease_id", lease_id)
+        res = query.order("reconciliation_year", desc=True).execute()
+        return res.data or []
+    except Exception as e:
+        # If join fails, try without join
+        st.warning(f"Note: Could not join with leases table: {str(e)}")
+        query = sb.table("cam_reconciliations").select("*")
+        if lease_id:
+            query = query.eq("lease_id", lease_id)
+        res = query.order("reconciliation_year", desc=True).execute()
+        return res.data or []
 
 def format_currency(amount):
     """Format amount as currency"""
@@ -134,6 +143,12 @@ with tab1:
     # Fetch all reconciliations
     all_reconciliations = fetch_cam_reconciliations()
     
+    # Debug output
+    st.write(f"🔍 **Debug:** Fetched {len(all_reconciliations)} reconciliation(s) from database")
+    if len(all_reconciliations) > 0:
+        with st.expander("🔍 Debug: Raw Data from Database"):
+            st.json(all_reconciliations)
+    
     # Calculate metrics
     total_reconciliations = len(all_reconciliations)
     total_variance = sum(r.get('variance_amount', 0) or 0 for r in all_reconciliations)
@@ -183,8 +198,18 @@ with tab1:
         st.markdown("### Recent Reconciliations")
         
         for recon in all_reconciliations[:10]:
+            # Handle both joined and non-joined data
             lease_info = recon.get('leases', {})
-            property_address = lease_info.get('property_address', 'Unknown Property')
+            if lease_info:
+                property_address = lease_info.get('property_address', 'Unknown Property')
+            else:
+                # If join didn't work, fetch lease separately
+                lease_id = recon.get('lease_id')
+                try:
+                    lease_res = sb.table("leases").select("property_address").eq("id", lease_id).execute()
+                    property_address = lease_res.data[0].get('property_address', 'Unknown Property') if lease_res.data else f"Lease ID: {lease_id}"
+                except:
+                    property_address = f"Lease ID: {lease_id}"
             
             col_a, col_b, col_c, col_d, col_e = st.columns([3, 1, 2, 2, 1])
             
