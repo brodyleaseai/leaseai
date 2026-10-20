@@ -143,12 +143,6 @@ with tab1:
     # Fetch all reconciliations
     all_reconciliations = fetch_cam_reconciliations()
     
-    # Debug output
-    st.write(f"🔍 **Debug:** Fetched {len(all_reconciliations)} reconciliation(s) from database")
-    if len(all_reconciliations) > 0:
-        with st.expander("🔍 Debug: Raw Data from Database"):
-            st.json(all_reconciliations)
-    
     # Calculate metrics
     total_reconciliations = len(all_reconciliations)
     total_variance = sum(r.get('variance_amount', 0) or 0 for r in all_reconciliations)
@@ -196,11 +190,8 @@ with tab1:
     # Recent reconciliations table
     if all_reconciliations:
         st.markdown("### Recent Reconciliations")
-        st.write(f"🔍 **Debug:** About to display {len(all_reconciliations[:10])} reconciliation(s)")
         
-        for idx, recon in enumerate(all_reconciliations[:10]):
-            st.write(f"🔍 **Debug:** Processing reconciliation #{idx+1}, ID: {recon.get('id', 'no-id')}")
-            
+        for recon in all_reconciliations[:10]:
             # Handle both joined and non-joined data
             lease_info = recon.get('leases', {})
             if lease_info:
@@ -213,8 +204,6 @@ with tab1:
                     property_address = lease_res.data[0].get('property_address', 'Unknown Property') if lease_res.data else f"Lease ID: {lease_id}"
                 except:
                     property_address = f"Lease ID: {lease_id}"
-            
-            st.write(f"🔍 **Debug:** Property address: {property_address}")
             
             col_a, col_b, col_c, col_d, col_e = st.columns([3, 1, 2, 2, 1])
             
@@ -447,8 +436,6 @@ with tab2:
             
             # Save button (now outside the Calculate button's block!)
             if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary", key="save_recon"):
-                st.write("🔍 **Debug: Save button clicked**")
-                
                 try:
                     # Prepare record
                     recon_record = {
@@ -467,18 +454,8 @@ with tab2:
                         'uploaded_at': datetime.now().isoformat()
                     }
                     
-                    # Show what we're trying to save (debug)
-                    with st.expander("🔍 Debug: Data being saved"):
-                        st.json(recon_record)
-                    
-                    st.write("🔄 Attempting to insert into database...")
-                    
                     # Attempt insert
                     result = sb.table("cam_reconciliations").insert(recon_record).execute()
-                    
-                    st.write("✅ Insert command completed")
-                    st.write(f"📊 Result type: {type(result)}")
-                    st.write(f"📊 Result data: {result.data if hasattr(result, 'data') else 'No data attribute'}")
                     
                     if result.data:
                         st.success("✅ CAM reconciliation saved successfully!")
@@ -491,40 +468,20 @@ with tab2:
                         
                         # Clear calculation results
                         del st.session_state['cam_calc_results']
-                        
-                        # Show saved record
-                        with st.expander("📋 Saved Record Details"):
-                            st.json(result.data[0])
                     else:
-                        st.warning("⚠️ Save completed but no data returned.")
-                        st.write("This might mean the save succeeded but Supabase didn't return the record.")
-                        st.info("Check the 'History' tab to see if the record appears.")
+                        st.warning("⚠️ Save completed but no confirmation returned. Please check the History tab.")
                     
                 except Exception as e:
-                    st.error(f"❌ Failed to save reconciliation")
-                    st.error(f"**Error type:** {type(e).__name__}")
-                    st.error(f"**Error message:** {str(e)}")
+                    st.error(f"❌ Failed to save reconciliation: {str(e)}")
                     
-                    # Show full traceback for debugging
-                    import traceback
-                    with st.expander("🔍 Full Error Traceback"):
-                        st.code(traceback.format_exc())
-                    
-                    # More helpful error messages
+                    # More helpful error messages for common issues
                     error_str = str(e).lower()
                     if 'does not exist' in error_str or 'relation' in error_str:
-                        st.error("🗄️ **Issue:** Database tables not found")
-                        st.info("**Solution:** Run the database schema script in Supabase SQL Editor")
+                        st.info("💡 Database tables may not be set up. Please run the database schema script.")
                     elif 'permission denied' in error_str:
-                        st.error("🔒 **Issue:** Permission denied")
-                        st.info("**Solution:** Run GRANT statements in Supabase SQL Editor")
+                        st.info("💡 Permission issue. Please run the GRANT statements in Supabase SQL Editor.")
                     elif 'foreign key' in error_str or 'violates' in error_str:
-                        st.error("🔗 **Issue:** Foreign key constraint violation")
-                        st.info("**Solution:** The lease_id might not exist in the leases table")
-                        st.write(f"Lease ID being used: {results['lease_id']}")
-                    elif 'null value' in error_str:
-                        st.error("⚠️ **Issue:** Required field is null")
-                        st.info("Check which fields are missing in the error message above")
+                        st.info("💡 The selected lease may not exist in the database.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3: HISTORY
