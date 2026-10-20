@@ -293,10 +293,62 @@ with tab2:
                     excluded = cam_provisions.get('excluded_items', [])
                     st.write(", ".join(excluded) if excluded else "None specified")
         else:
-            st.warning("⚠️ No CAM provisions extracted from lease. You can still proceed, but calculations may be limited.")
+            st.warning("⚠️ No CAM provisions extracted from lease. Extract them now for accurate calculations.")
             
-            if st.button("Extract CAM Provisions Now"):
-                st.info("CAM provision extraction will be implemented in the next phase.")
+            col_extract1, col_extract2 = st.columns([1, 2])
+            
+            with col_extract1:
+                if st.button("🤖 Extract CAM Provisions with AI", use_container_width=True, type="primary"):
+                    with st.spinner("Extracting CAM provisions using GPT-4o..."):
+                        try:
+                            from cam_gpt_extractor import extract_cam_provisions_with_gpt, save_cam_provisions_to_db
+                            import openai
+                            
+                            # Get OpenAI API key
+                            api_key = st.secrets.get("OPENAI_API_KEY")
+                            if not api_key:
+                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                            else:
+                                # Fetch lease text
+                                lease_res = sb.table("leases").select("*").eq("id", selected_lease_id).execute()
+                                if lease_res.data:
+                                    lease_data = lease_res.data[0]
+                                    
+                                    # Get extracted fields text
+                                    fields_res = sb.table("extracted_fields").select("*").eq("lease_id", selected_lease_id).execute()
+                                    lease_text = f"Property: {lease_data.get('property_address')}\n"
+                                    lease_text += f"Tenant: {lease_data.get('tenant_name')}\n\n"
+                                    
+                                    # Build lease text from extracted fields
+                                    for field in fields_res.data:
+                                        field_name = field.get('field_name', '')
+                                        value = field.get('reviewed_value') or field.get('raw_value', '')
+                                        lease_text += f"{field_name}: {value}\n"
+                                    
+                                    # Extract provisions
+                                    provisions = extract_cam_provisions_with_gpt(lease_text, api_key)
+                                    
+                                    if provisions.get('error'):
+                                        st.error(f"Extraction failed: {provisions['error']}")
+                                    else:
+                                        # Save to database
+                                        if save_cam_provisions_to_db(selected_lease_id, provisions, sb):
+                                            st.success("✅ CAM provisions extracted and saved!")
+                                            st.balloons()
+                                            st.info("Refresh the page to see the extracted provisions.")
+                                            
+                                            # Show extracted data
+                                            with st.expander("📋 View Extracted Provisions"):
+                                                st.json(provisions)
+                                        else:
+                                            st.error("Failed to save provisions to database")
+                                else:
+                                    st.error("Lease not found")
+                        except Exception as e:
+                            st.error(f"Extraction error: {str(e)}")
+            
+            with col_extract2:
+                st.caption("Uses GPT-4o to analyze the lease and extract all CAM-related terms, caps, exclusions, and tenant share.")
         
         st.markdown("---")
         
@@ -344,12 +396,100 @@ with tab2:
         uploaded_file = st.file_uploader(
             "Upload CAM Statement",
             type=['pdf', 'csv', 'xlsx'],
-            help="We'll automatically extract and categorize line items"
+            help="We'll automatically extract and categorize line items",
+            key="cam_statement_upload"
         )
+        
+        parsed_line_items = []
+        parsed_metadata = {}
         
         if uploaded_file:
             st.success(f"✅ File uploaded: {uploaded_file.name}")
-            st.info("🔄 Automatic line-item extraction will be implemented in Phase 2B")
+            
+            if st.button("🤖 Parse CAM Statement with AI", use_container_width=True, type="primary"):
+                with st.spinner("Parsing CAM statement using GPT-4o..."):
+                    try:
+                        from cam_gpt_extractor import parse_cam_statement_with_gpt, extract_text_from_pdf
+                        import tempfile
+                        
+                        # Get OpenAI API key
+                        api_key = st.secrets.get("OPENAI_API_KEY")
+                        if not api_key:
+                            st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                        else:
+                            # Save uploaded file temporarily
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                                tmp_file.write(uploaded_file.getvalue())
+                                tmp_path = tmp_file.name
+                            
+                            # Extract text from PDF
+                            statement_text = extract_text_from_pdf(tmp_path)
+                            
+                            if not statement_text:
+                                st.error("Failed to extract text from PDF")
+                            else:
+                                # Parse with GPT-4o
+                                parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
+                                
+                                if parsed_data.get('error'):
+                                    st.error(f"Parsing failed: {parsed_data['error']}")
+                                else:
+                                    st.success(f"✅ Extracted {parsed_data.get('total_line_items', 0)} line items!")
+                                    st.balloons()
+                                    
+                                    # Store in session state
+                                    st.session_state['parsed_cam_statement'] = parsed_data
+                                    parsed_line_items = parsed_data.get('line_items', [])
+                                    parsed_metadata = parsed_data
+                                    
+                                    # Auto-fill fields if available
+                                    if parsed_data.get('total_building_charges'):
+                                        landlord_total = float(parsed_data['total_building_charges'])
+                                        st.info(f"Auto-filled: Total Building Charges = ${landlord_total:,.2f}")
+                                    
+                                    if parsed_data.get('tenant_share_billed'):
+                                        tenant_share_billed = float(parsed_data['tenant_share_billed'])
+                                        st.info(f"Auto-filled: Tenant Share Billed = ${tenant_share_billed:,.2f}")
+                            
+                            # Clean up temp file
+                            import os
+                            os.unlink(tmp_path)
+                    
+                    except Exception as e:
+                        st.error(f"Parsing error: {str(e)}")
+        
+        # Show parsed line items if available
+        if 'parsed_cam_statement' in st.session_state:
+            parsed_data = st.session_state['parsed_cam_statement']
+            line_items = parsed_data.get('line_items', [])
+            
+            if line_items:
+                st.markdown("### 📊 Extracted Line Items")
+                st.write(f"**Total items:** {len(line_items)}")
+                
+                # Display in table
+                import pandas as pd
+                df = pd.DataFrame(line_items)
+                if not df.empty:
+                    # Format amount column
+                    if 'amount' in df.columns:
+                        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                    
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    
+                    # Summary by category
+                    with st.expander("📈 Summary by Category"):
+                        # Recreate numeric column for grouping
+                        line_items_for_summary = parsed_data.get('line_items', [])
+                        if line_items_for_summary:
+                            category_totals = {}
+                            for item in line_items_for_summary:
+                                cat = item.get('category', 'OTHER')
+                                amt = float(item.get('amount', 0))
+                                category_totals[cat] = category_totals.get(cat, 0) + amt
+                            
+                            for cat, total in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+                                st.write(f"**{cat}:** ${total:,.2f}")
         
         st.markdown("---")
         
