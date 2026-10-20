@@ -196,8 +196,11 @@ with tab1:
     # Recent reconciliations table
     if all_reconciliations:
         st.markdown("### Recent Reconciliations")
+        st.write(f"🔍 **Debug:** About to display {len(all_reconciliations[:10])} reconciliation(s)")
         
-        for recon in all_reconciliations[:10]:
+        for idx, recon in enumerate(all_reconciliations[:10]):
+            st.write(f"🔍 **Debug:** Processing reconciliation #{idx+1}, ID: {recon.get('id', 'no-id')}")
+            
             # Handle both joined and non-joined data
             lease_info = recon.get('leases', {})
             if lease_info:
@@ -210,6 +213,8 @@ with tab1:
                     property_address = lease_res.data[0].get('property_address', 'Unknown Property') if lease_res.data else f"Lease ID: {lease_id}"
                 except:
                     property_address = f"Lease ID: {lease_id}"
+            
+            st.write(f"🔍 **Debug:** Property address: {property_address}")
             
             col_a, col_b, col_c, col_d, col_e = st.columns([3, 1, 2, 2, 1])
             
