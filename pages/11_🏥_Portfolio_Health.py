@@ -18,12 +18,21 @@ import os
 # Page config
 st.set_page_config(page_title="Portfolio Health", page_icon="🏥", layout="wide")
 
+# Load config
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
+except Exception:
+    try:
+        from config import SUPABASE_URL, SUPABASE_SERVICE_KEY
+    except ImportError:
+        st.error("⚠️ No secrets configured. Add them to Streamlit secrets or config.py.")
+        st.stop()
+
 # Initialize Supabase
 @st.cache_resource
 def init_supabase():
-    url = st.secrets.get("SUPABASE_URL")
-    key = st.secrets.get("SUPABASE_KEY")
-    return create_client(url, key)
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 sb = init_supabase()
 
