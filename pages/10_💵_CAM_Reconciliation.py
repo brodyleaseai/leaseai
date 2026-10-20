@@ -340,7 +340,7 @@ with tab2:
         if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
             if landlord_total > 0 and tenant_share_billed > 0:
                 try:
-                    from cam_engine import calculate_cam_charges, detect_discrepancies
+                    from cam_engine import calculate_cam_charges
                     
                     # Calculate correct tenant share
                     if cam_provisions:
@@ -351,131 +351,150 @@ with tab2:
                         calculated_share = tenant_share_billed
                         calc_result = {'calculated_tenant_share': calculated_share}
                     
-                    # Detect discrepancies
-                    discrepancy = {
-                        'landlord_total': tenant_share_billed,
-                        'calculated_total': calculated_share,
-                        'variance_amount': tenant_share_billed - calculated_share,
-                        'variance_percentage': ((tenant_share_billed - calculated_share) / tenant_share_billed * 100) if tenant_share_billed > 0 else 0
+                    # Calculate variance
+                    variance = tenant_share_billed - calculated_share
+                    variance_percentage = ((tenant_share_billed - calculated_share) / tenant_share_billed * 100) if tenant_share_billed > 0 else 0
+                    
+                    # Store in session state so it persists across reruns
+                    st.session_state['cam_calc_results'] = {
+                        'lease_id': selected_lease_id,
+                        'recon_year': recon_year,
+                        'statement_date': statement_date,
+                        'landlord_total': landlord_total,
+                        'tenant_share_billed': tenant_share_billed,
+                        'calculated_share': calculated_share,
+                        'variance': variance,
+                        'variance_percentage': variance_percentage
                     }
                     
-                    # Display results
-                    st.markdown("### 📊 Reconciliation Results")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Landlord Billed Amount",
-                            format_currency(tenant_share_billed)
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Correct Amount (Per Lease)",
-                            format_currency(calculated_share)
-                        )
-                    
-                    with col3:
-                        variance = discrepancy['variance_amount']
-                        variance_label = "Overcharge" if variance > 0 else "Undercharge"
-                        st.metric(
-                            variance_label,
-                            format_currency(abs(variance)),
-                            delta=f"{abs(discrepancy['variance_percentage']):.1f}%",
-                            delta_color="inverse" if variance > 0 else "normal"
-                        )
-                    
-                    # Recommendation
-                    if abs(variance) < 100:
-                        st.success("✅ Variance is minor (< $100). Recommended action: ACCEPT")
-                    elif abs(variance) < 500:
-                        st.warning("⚠️ Moderate variance found (< $500). Recommended action: REQUEST CLARIFICATION")
-                    else:
-                        st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
-                    
-                    # Save button
-                    if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary"):
-                        st.write("🔍 **Debug: Save button clicked**")
-                        
-                        try:
-                            # Prepare record
-                            recon_record = {
-                                'lease_id': selected_lease_id,
-                                'reconciliation_year': int(recon_year),
-                                'statement_date': statement_date.isoformat(),
-                                'landlord_total_charges': float(landlord_total),
-                                'landlord_tenant_share': float(tenant_share_billed),
-                                'calculated_total_charges': float(landlord_total),
-                                'calculated_tenant_share': float(calculated_share),
-                                'variance_amount': float(variance),
-                                'variance_percentage': float(discrepancy['variance_percentage']),
-                                'status': 'UNDER_REVIEW',
-                                'dispute_status': 'NOT_DISPUTED' if abs(variance) < 100 else 'CHALLENGE_DRAFTED',
-                                'uploaded_by': st.session_state.get('user_id'),
-                                'uploaded_at': datetime.now().isoformat()
-                            }
-                            
-                            # Show what we're trying to save (debug)
-                            with st.expander("🔍 Debug: Data being saved"):
-                                st.json(recon_record)
-                            
-                            st.write("🔄 Attempting to insert into database...")
-                            
-                            # Attempt insert
-                            result = sb.table("cam_reconciliations").insert(recon_record).execute()
-                            
-                            st.write("✅ Insert command completed")
-                            st.write(f"📊 Result type: {type(result)}")
-                            st.write(f"📊 Result data: {result.data if hasattr(result, 'data') else 'No data attribute'}")
-                            
-                            if result.data:
-                                st.success("✅ CAM reconciliation saved successfully!")
-                                st.balloons()
-                                st.info("💡 Switch to the 'Dashboard' or 'History' tab to view your saved reconciliation.")
-                                
-                                # Store success state to show on other tabs
-                                st.session_state['last_reconciliation_saved'] = True
-                                st.session_state['saved_reconciliation_id'] = result.data[0].get('id')
-                                
-                                # Show saved record
-                                with st.expander("📋 Saved Record Details"):
-                                    st.json(result.data[0])
-                            else:
-                                st.warning("⚠️ Save completed but no data returned.")
-                                st.write("This might mean the save succeeded but Supabase didn't return the record.")
-                                st.info("Check the 'History' tab to see if the record appears.")
-                            
-                        except Exception as e:
-                            st.error(f"❌ Failed to save reconciliation")
-                            st.error(f"**Error type:** {type(e).__name__}")
-                            st.error(f"**Error message:** {str(e)}")
-                            
-                            # Show full traceback for debugging
-                            import traceback
-                            with st.expander("🔍 Full Error Traceback"):
-                                st.code(traceback.format_exc())
-                            
-                            # More helpful error messages
-                            error_str = str(e).lower()
-                            if 'does not exist' in error_str or 'relation' in error_str:
-                                st.error("🗄️ **Issue:** Database tables not found")
-                                st.info("**Solution:** Run the database schema script in Supabase SQL Editor")
-                            elif 'permission denied' in error_str:
-                                st.error("🔒 **Issue:** Permission denied")
-                                st.info("**Solution:** Run GRANT statements in Supabase SQL Editor")
-                            elif 'foreign key' in error_str or 'violates' in error_str:
-                                st.error("🔗 **Issue:** Foreign key constraint violation")
-                                st.info("**Solution:** The lease_id might not exist in the leases table")
-                                st.write(f"Lease ID being used: {selected_lease_id}")
-                            elif 'null value' in error_str:
-                                st.error("⚠️ **Issue:** Required field is null")
-                                st.info("Check which fields are missing in the error message above")
+                    st.success("✅ Calculation complete! Results shown below.")
                     
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
             else:
                 st.warning("Please enter both the landlord total charges and tenant share billed amounts.")
+        
+        # Show results if they exist in session state
+        if 'cam_calc_results' in st.session_state:
+            results = st.session_state['cam_calc_results']
+            
+            # Display results
+            st.markdown("### 📊 Reconciliation Results")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Landlord Billed Amount",
+                    format_currency(results['tenant_share_billed'])
+                )
+            
+            with col2:
+                st.metric(
+                    "Correct Amount (Per Lease)",
+                    format_currency(results['calculated_share'])
+                )
+            
+            with col3:
+                variance = results['variance']
+                variance_label = "Overcharge" if variance > 0 else "Undercharge"
+                st.metric(
+                    variance_label,
+                    format_currency(abs(variance)),
+                    delta=f"{abs(results['variance_percentage']):.1f}%",
+                    delta_color="inverse" if variance > 0 else "normal"
+                )
+            
+            # Recommendation
+            if abs(variance) < 100:
+                st.success("✅ Variance is minor (< $100). Recommended action: ACCEPT")
+            elif abs(variance) < 500:
+                st.warning("⚠️ Moderate variance found (< $500). Recommended action: REQUEST CLARIFICATION")
+            else:
+                st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
+            
+            st.markdown("---")
+            
+            # Save button (now outside the Calculate button's block!)
+            if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary", key="save_recon"):
+                st.write("🔍 **Debug: Save button clicked**")
+                
+                try:
+                    # Prepare record
+                    recon_record = {
+                        'lease_id': results['lease_id'],
+                        'reconciliation_year': int(results['recon_year']),
+                        'statement_date': results['statement_date'].isoformat(),
+                        'landlord_total_charges': float(results['landlord_total']),
+                        'landlord_tenant_share': float(results['tenant_share_billed']),
+                        'calculated_total_charges': float(results['landlord_total']),
+                        'calculated_tenant_share': float(results['calculated_share']),
+                        'variance_amount': float(results['variance']),
+                        'variance_percentage': float(results['variance_percentage']),
+                        'status': 'UNDER_REVIEW',
+                        'dispute_status': 'NOT_DISPUTED' if abs(results['variance']) < 100 else 'CHALLENGE_DRAFTED',
+                        'uploaded_by': st.session_state.get('user_id'),
+                        'uploaded_at': datetime.now().isoformat()
+                    }
+                    
+                    # Show what we're trying to save (debug)
+                    with st.expander("🔍 Debug: Data being saved"):
+                        st.json(recon_record)
+                    
+                    st.write("🔄 Attempting to insert into database...")
+                    
+                    # Attempt insert
+                    result = sb.table("cam_reconciliations").insert(recon_record).execute()
+                    
+                    st.write("✅ Insert command completed")
+                    st.write(f"📊 Result type: {type(result)}")
+                    st.write(f"📊 Result data: {result.data if hasattr(result, 'data') else 'No data attribute'}")
+                    
+                    if result.data:
+                        st.success("✅ CAM reconciliation saved successfully!")
+                        st.balloons()
+                        st.info("💡 Switch to the 'Dashboard' or 'History' tab to view your saved reconciliation.")
+                        
+                        # Store success state to show on other tabs
+                        st.session_state['last_reconciliation_saved'] = True
+                        st.session_state['saved_reconciliation_id'] = result.data[0].get('id')
+                        
+                        # Clear calculation results
+                        del st.session_state['cam_calc_results']
+                        
+                        # Show saved record
+                        with st.expander("📋 Saved Record Details"):
+                            st.json(result.data[0])
+                    else:
+                        st.warning("⚠️ Save completed but no data returned.")
+                        st.write("This might mean the save succeeded but Supabase didn't return the record.")
+                        st.info("Check the 'History' tab to see if the record appears.")
+                    
+                except Exception as e:
+                    st.error(f"❌ Failed to save reconciliation")
+                    st.error(f"**Error type:** {type(e).__name__}")
+                    st.error(f"**Error message:** {str(e)}")
+                    
+                    # Show full traceback for debugging
+                    import traceback
+                    with st.expander("🔍 Full Error Traceback"):
+                        st.code(traceback.format_exc())
+                    
+                    # More helpful error messages
+                    error_str = str(e).lower()
+                    if 'does not exist' in error_str or 'relation' in error_str:
+                        st.error("🗄️ **Issue:** Database tables not found")
+                        st.info("**Solution:** Run the database schema script in Supabase SQL Editor")
+                    elif 'permission denied' in error_str:
+                        st.error("🔒 **Issue:** Permission denied")
+                        st.info("**Solution:** Run GRANT statements in Supabase SQL Editor")
+                    elif 'foreign key' in error_str or 'violates' in error_str:
+                        st.error("🔗 **Issue:** Foreign key constraint violation")
+                        st.info("**Solution:** The lease_id might not exist in the leases table")
+                        st.write(f"Lease ID being used: {results['lease_id']}")
+                    elif 'null value' in error_str:
+                        st.error("⚠️ **Issue:** Required field is null")
+                        st.info("Check which fields are missing in the error message above")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3: HISTORY
