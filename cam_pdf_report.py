@@ -156,93 +156,129 @@ class CAMReconciliationPDFReport:
         """Create cover page with executive summary"""
         elements = []
         
-        # Title
-        elements.append(Paragraph("CAM Reconciliation Audit Report", self.styles['CustomTitle']))
-        elements.append(Spacer(1, 0.3*inch))
+        # Title with better spacing
+        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Paragraph("CAM RECONCILIATION AUDIT REPORT", self.styles['CustomTitle']))
+        elements.append(Spacer(1, 0.5*inch))
         
-        # Property & tenant info
+        # Property & tenant info in cleaner table
         property_info = [
             ['<b>Property:</b>', lease_data.get('property_address', 'N/A')],
             ['<b>Tenant:</b>', lease_data.get('tenant_name', 'N/A')],
-            ['<b>Reconciliation Period:</b>', f"Year {reconciliation.get('reconciliation_year', 'N/A')}"],
+            ['<b>Period:</b>', f"Year {reconciliation.get('reconciliation_year', 'N/A')}"],
             ['<b>Statement Date:</b>', reconciliation.get('statement_date', 'N/A')],
-            ['<b>Report Generated:</b>', datetime.now().strftime('%B %d, %Y')]
+            ['<b>Report Date:</b>', datetime.now().strftime('%B %d, %Y')]
         ]
         
-        info_table = Table(property_info, colWidths=[2*inch, 4.5*inch])
+        info_table = Table(property_info, colWidths=[1.5*inch, 5*inch])
         info_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1f4788')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         
         elements.append(info_table)
-        elements.append(Spacer(1, 0.4*inch))
+        elements.append(Spacer(1, 0.6*inch))
         
-        # Financial Summary Box
+        # Financial Summary Section Header
+        elements.append(Paragraph("FINANCIAL SUMMARY", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Financial Summary Box - cleaner design
         variance = reconciliation.get('variance_amount', 0)
         variance_pct = reconciliation.get('variance_percentage', 0)
         
-        # Determine color based on variance
+        # Determine status and color
         if abs(variance) < 100:
-            color = colors.HexColor('#d4edda')  # Green
-            status_text = "✓ ACCURATE"
-            status_color = colors.HexColor('#155724')
+            bg_color = colors.HexColor('#e8f5e9')  # Light green
+            status_text = "ACCURATE"
+            status_icon = "[OK]"
+            status_color = colors.HexColor('#2e7d32')  # Dark green
         elif abs(variance) < 500:
-            color = colors.HexColor('#fff3cd')  # Yellow
-            status_text = "⚠ MINOR VARIANCE"
-            status_color = colors.HexColor('#856404')
+            bg_color = colors.HexColor('#fff9e6')  # Light yellow
+            status_text = "MINOR VARIANCE"
+            status_icon = "[!]"
+            status_color = colors.HexColor('#f57c00')  # Orange
         elif abs(variance) < 2000:
-            color = colors.HexColor('#ffe5d0')  # Orange
-            status_text = "⚠ MODERATE VARIANCE"
-            status_color = colors.HexColor('#cc5500')
+            bg_color = colors.HexColor('#fff3e0')  # Light orange
+            status_text = "MODERATE VARIANCE"
+            status_icon = "[!!]"
+            status_color = colors.HexColor('#e65100')  # Dark orange
         else:
-            color = colors.HexColor('#f8d7da')  # Red
-            status_text = "⚠ SIGNIFICANT VARIANCE"
-            status_color = colors.HexColor('#721c24')
+            bg_color = colors.HexColor('#ffebee')  # Light red
+            status_text = "SIGNIFICANT VARIANCE"
+            status_icon = "[!!!]"
+            status_color = colors.HexColor('#c62828')  # Dark red
         
+        # Build summary table with better layout
         summary_data = [
-            ['<b>Landlord Total Charges</b>', f"${reconciliation.get('landlord_total_charges', 0):,.2f}"],
-            ['<b>Calculated Total Charges</b>', f"${reconciliation.get('calculated_total_charges', 0):,.2f}"],
+            ['<b>LANDLORD CHARGES</b>', ''],
+            ['   Total Building Charges:', f"${reconciliation.get('landlord_total_charges', 0):,.2f}"],
+            ['   Your Share (Billed):', f"${reconciliation.get('landlord_tenant_share', 0):,.2f}"],
             ['', ''],
-            ['<b>Landlord Tenant Share</b>', f"${reconciliation.get('landlord_tenant_share', 0):,.2f}"],
-            ['<b>Calculated Tenant Share</b>', f"${reconciliation.get('calculated_tenant_share', 0):,.2f}"],
+            ['<b>CALCULATED CHARGES</b>', ''],
+            ['   Total Building Charges:', f"${reconciliation.get('calculated_total_charges', 0):,.2f}"],
+            ['   Your Share (Per Lease):', f"${reconciliation.get('calculated_tenant_share', 0):,.2f}"],
             ['', ''],
-            ['<b><font size="12">Variance Amount</font></b>', f'<b><font size="12" color="{status_color}">${variance:,.2f}</font></b>'],
-            ['<b>Variance Percentage</b>', f'{variance_pct:.2f}%'],
             ['', ''],
-            ['<b><font size="13">Status:</font></b>', f'<b><font size="13" color="{status_color}">{status_text}</font></b>']
+            ['<b><font size="13">VARIANCE:</font></b>', f'<b><font size="13">${abs(variance):,.2f}</font></b>'],
+            ['<b>Percentage:</b>', f'<b>{abs(variance_pct):.2f}%</b>'],
         ]
         
-        summary_table = Table(summary_data, colWidths=[3.5*inch, 3*inch])
+        summary_table = Table(summary_data, colWidths=[3.8*inch, 2.7*inch])
         summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), color),
-            ('BOX', (0, 0), (-1, -1), 2, colors.grey),
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#bdbdbd')),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            # Section headers
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTSIZE', (0, 4), (-1, 4), 11),
+            # Variance row highlight
+            ('BACKGROUND', (0, 9), (-1, 10), colors.white),
+            ('TOPPADDING', (0, 9), (-1, 10), 12),
+            ('BOTTOMPADDING', (0, 9), (-1, 10), 12),
+            ('LINEABOVE', (0, 9), (-1, 9), 2, colors.HexColor('#757575')),
         ]))
         
         elements.append(summary_table)
         elements.append(Spacer(1, 0.3*inch))
         
-        # Recommendation
-        elements.append(Paragraph("<b>Recommendation:</b>", self.styles['SubsectionHeader']))
+        # Status Badge
+        status_data = [[f'<b><font size="14" color="{status_color}">{status_icon} STATUS: {status_text}</font></b>']]
+        status_table = Table(status_data, colWidths=[6.5*inch])
+        status_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('BOX', (0, 0), (-1, -1), 2, status_color),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+        ]))
+        
+        elements.append(status_table)
+        elements.append(Spacer(1, 0.4*inch))
+        
+        # Recommendation Section
+        elements.append(Paragraph("RECOMMENDATION", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.15*inch))
         
         if abs(variance) < 100:
-            recommendation = "The landlord's CAM reconciliation is accurate and within acceptable tolerance. Recommend accepting the charges as billed."
+            recommendation = "The landlord's CAM reconciliation is <b>accurate</b> and within acceptable tolerance. The variance of ${:,.2f} represents less than 1% of the total charges. <b>Recommend accepting</b> the charges as billed.".format(abs(variance))
         elif abs(variance) < 500:
-            recommendation = "Minor variance detected. Review the line-item breakdown for any obvious errors. May accept if differences are immaterial."
+            recommendation = "A <b>minor variance</b> of ${:,.2f} ({:.1f}%) has been detected. This may be due to rounding differences or minor calculation discrepancies. <b>Review recommended</b> but likely acceptable if differences are immaterial to your business.".format(abs(variance), abs(variance_pct))
         elif abs(variance) < 2000:
-            recommendation = "Moderate variance detected. Recommend reviewing the detailed line items and requesting clarification from landlord on discrepancies before payment."
+            recommendation = "A <b>moderate variance</b> of ${:,.2f} ({:.1f}%) has been identified. We recommend <b>requesting clarification</b> from the landlord regarding the specific line items causing the discrepancy before making payment. See detailed analysis on the following pages.".format(abs(variance), abs(variance_pct))
         else:
-            recommendation = f"Significant ${abs(variance):,.2f} variance detected. Strongly recommend disputing the charges and conducting a thorough audit. See detailed analysis on following pages."
+            recommendation = "A <b>significant variance</b> of ${:,.2f} ({:.1f}%) has been detected. This represents a material discrepancy that warrants immediate attention. We <b>strongly recommend disputing</b> these charges and conducting a thorough audit. Consider exercising your lease audit rights. Detailed line-item analysis follows.".format(abs(variance), abs(variance_pct))
         
         elements.append(Paragraph(recommendation, self.styles['CAMBodyText']))
         
@@ -252,8 +288,9 @@ class CAMReconciliationPDFReport:
         """Create variance summary by category"""
         elements = []
         
-        elements.append(Paragraph("Variance Analysis by Category", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.2*inch))
+        elements.append(Paragraph("VARIANCE ANALYSIS BY CATEGORY", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.3*inch))
         
         # Group line items by category
         category_totals = {}
@@ -269,61 +306,91 @@ class CAMReconciliationPDFReport:
             category_totals[cat]['variance'] += variance
             category_totals[cat]['count'] += 1
         
-        # Build category table
-        category_data = [['Category', 'Total Amount', 'Variance', 'Line Items']]
+        if category_totals:
+            # Build category table
+            category_data = [['<b>CATEGORY</b>', '<b>TOTAL AMOUNT</b>', '<b>VARIANCE</b>', '<b>ITEMS</b>']]
+            
+            for cat in sorted(category_totals.keys(), key=lambda x: abs(category_totals[x]['variance']), reverse=True):
+                data = category_totals[cat]
+                category_data.append([
+                    cat.replace('_', ' ').title(),
+                    f"${data['total']:,.2f}",
+                    f"${data['variance']:,.2f}",
+                    str(data['count'])
+                ])
+            
+            # Add total row
+            total_amt = sum(d['total'] for d in category_totals.values())
+            total_var = sum(d['variance'] for d in category_totals.values())
+            total_items = sum(d['count'] for d in category_totals.values())
+            category_data.append(['<b>TOTAL</b>', f"<b>${total_amt:,.2f}</b>", f"<b>${total_var:,.2f}</b>", f"<b>{total_items}</b>"])
+            
+            category_table = Table(category_data, colWidths=[2.5*inch, 1.75*inch, 1.75*inch, 0.5*inch])
+            category_table.setStyle(TableStyle([
+                # Header row
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
+                ('TOPPADDING', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                # Alternating row colors
+                ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f5f5f5')]),
+                # Total row
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e0e0e0')),
+                ('LINEABOVE', (0, -1), (-1, -1), 2, colors.HexColor('#757575')),
+            ]))
+            
+            elements.append(category_table)
+        else:
+            elements.append(Paragraph("<i>No line item data available for category analysis.</i>", self.styles['CAMBodyText']))
         
-        for cat in sorted(category_totals.keys()):
-            data = category_totals[cat]
-            category_data.append([
-                cat.replace('_', ' ').title(),
-                f"${data['total']:,.2f}",
-                f"${data['variance']:,.2f}",
-                str(data['count'])
-            ])
-        
-        category_table = Table(category_data, colWidths=[2.5*inch, 1.75*inch, 1.75*inch, 1*inch])
-        category_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')])
-        ]))
-        
-        elements.append(category_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.4*inch))
         
         # Key findings
-        elements.append(Paragraph("Key Findings:", self.styles['SubsectionHeader']))
+        elements.append(Paragraph("KEY FINDINGS", self.styles['SubsectionHeader']))
+        elements.append(Spacer(1, 0.15*inch))
         
         findings = []
         
-        # Find largest variances
-        sorted_cats = sorted(category_totals.items(), key=lambda x: abs(x[1]['variance']), reverse=True)
-        if sorted_cats and abs(sorted_cats[0][1]['variance']) > 100:
-            cat_name = sorted_cats[0][0].replace('_', ' ').title()
-            variance_amt = sorted_cats[0][1]['variance']
-            findings.append(f"• Largest variance in <b>{cat_name}</b>: ${abs(variance_amt):,.2f}")
+        if category_totals:
+            # Find largest variances
+            sorted_cats = sorted(category_totals.items(), key=lambda x: abs(x[1]['variance']), reverse=True)
+            if sorted_cats and abs(sorted_cats[0][1]['variance']) > 100:
+                cat_name = sorted_cats[0][0].replace('_', ' ').title()
+                variance_amt = sorted_cats[0][1]['variance']
+                findings.append(f"• <b>Largest variance</b> in {cat_name}: ${abs(variance_amt):,.2f}")
+            
+            # Count flagged items
+            flagged_count = sum(1 for item in line_items if item.get('should_challenge', False))
+            if flagged_count > 0:
+                findings.append(f"• <b>{flagged_count} line items</b> flagged for review or challenge")
         
         # Check for excluded items
         excluded = cam_provisions.get('excluded_items', [])
         if excluded:
-            findings.append(f"• Lease excludes: {', '.join(excluded)}")
+            excluded_str = ', '.join(excluded)
+            findings.append(f"• Per lease terms, the following are <b>excluded from CAM</b>: {excluded_str}")
         
         # Check CAM cap
         if cam_provisions.get('has_cam_cap'):
             cap_pct = cam_provisions.get('cam_cap_percentage', 0)
-            findings.append(f"• Annual CAM increase capped at {cap_pct}%")
+            findings.append(f"• Lease includes <b>{cap_pct}% annual CAM cap</b> on increases")
+        
+        # Check audit rights
+        if cam_provisions.get('tenant_audit_right'):
+            findings.append(f"• Tenant has <b>audit rights</b> per lease agreement")
         
         if not findings:
-            findings.append("• No significant issues identified")
+            findings.append("• No significant issues or special provisions identified")
         
         for finding in findings:
             elements.append(Paragraph(finding, self.styles['CAMBodyText']))
-            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Spacer(1, 0.08*inch))
         
         return elements
     
@@ -331,28 +398,67 @@ class CAMReconciliationPDFReport:
         """Create detailed line item comparison table"""
         elements = []
         
-        elements.append(Paragraph("Detailed Line Item Breakdown", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.2*inch))
+        elements.append(Paragraph("DETAILED LINE ITEM BREAKDOWN", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.3*inch))
         
         if not line_items:
-            elements.append(Paragraph("No line items available.", self.styles['CAMBodyText']))
+            # Create a nice info box instead of plain text
+            no_data_message = [
+                ['<b>NO LINE ITEM DATA AVAILABLE</b>'],
+                [''],
+                ['This reconciliation was performed without detailed line-item data from the landlord\'s CAM statement.'],
+                [''],
+                ['To perform a comprehensive line-by-line analysis, please:'],
+                ['   1. Request a detailed CAM statement from your landlord'],
+                ['   2. Upload the statement in the CAM Reconciliation module'],
+                ['   3. Use the "Parse CAM Statement with AI" feature'],
+                ['   4. Regenerate this report with line item details']
+            ]
+            
+            no_data_table = Table(no_data_message, colWidths=[6*inch])
+            no_data_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e3f2fd')),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f5f5f5')),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#90caf9')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, 0), 15),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 15),
+                ('TOPPADDING', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 15),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+            ]))
+            
+            elements.append(no_data_table)
             return elements
         
-        # Build table data
-        table_data = [['#', 'Description', 'Category', 'Amount', 'Variance', 'Status']]
+        # Build table data with line items
+        table_data = [['<b>#</b>', '<b>DESCRIPTION</b>', '<b>CATEGORY</b>', '<b>AMOUNT</b>', '<b>VARIANCE</b>', '<b>FLAG</b>']]
         
         for idx, item in enumerate(line_items, 1):
-            desc = item.get('description', 'N/A')[:40]  # Truncate long descriptions
-            cat = item.get('category', 'OTHER').replace('_', ' ')[:15]
+            desc = item.get('description', 'N/A')
+            if len(desc) > 50:
+                desc = desc[:47] + '...'
+            
+            cat = item.get('category', 'OTHER').replace('_', ' ')
+            if len(cat) > 18:
+                cat = cat[:15] + '...'
+            
             amt = float(item.get('amount', 0))
             variance = float(item.get('variance', 0))
             
+            # Status flag
             if abs(variance) < 50:
-                status = '✓'
+                flag = 'OK'
             elif abs(variance) < 200:
-                status = '⚠'
+                flag = 'Review'
             else:
-                status = '✗'
+                flag = 'Challenge'
             
             table_data.append([
                 str(idx),
@@ -360,20 +466,24 @@ class CAMReconciliationPDFReport:
                 cat,
                 f"${amt:,.2f}",
                 f"${variance:,.2f}" if variance != 0 else '-',
-                status
+                flag
             ])
         
-        line_table = Table(table_data, colWidths=[0.3*inch, 2.5*inch, 1.2*inch, 1*inch, 1*inch, 0.5*inch])
+        line_table = Table(table_data, colWidths=[0.3*inch, 2.5*inch, 1.3*inch, 1*inch, 1*inch, 0.7*inch])
         line_table.setStyle(TableStyle([
+            # Header row
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('ALIGN', (0, 0), (0, -1), 'CENTER'),
             ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ALIGN', (5, 0), (5, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdbdbd')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')])
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fafafa')]),
         ]))
         
         elements.append(line_table)
@@ -384,35 +494,102 @@ class CAMReconciliationPDFReport:
         """Create lease terms reference section"""
         elements = []
         
-        elements.append(Paragraph("Lease Terms Reference", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.2*inch))
+        elements.append(Paragraph("LEASE TERMS REFERENCE", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.3*inch))
         
-        terms_data = [
-            ['<b>CAM Base Year:</b>', str(cam_provisions.get('cam_base_year', 'Not specified'))],
-            ['<b>CAM Stop Amount:</b>', f"${cam_provisions.get('cam_stop_amount', 0):,.2f}" if cam_provisions.get('cam_stop_amount') else 'None'],
-            ['<b>Tenant Pro-Rata Share:</b>', f"{cam_provisions.get('tenant_prorata_share', 0)*100:.2f}%" if cam_provisions.get('tenant_prorata_share') else 'Not specified'],
-            ['<b>Tenant SF / Building SF:</b>', f"{cam_provisions.get('tenant_square_footage', 0):,} SF / {cam_provisions.get('building_square_footage', 0):,} SF"],
-            ['<b>CAM Cap:</b>', f"Yes - {cam_provisions.get('cam_cap_percentage', 0)}% annual max" if cam_provisions.get('has_cam_cap') else 'No cap'],
-            ['<b>Payment Frequency:</b>', cam_provisions.get('cam_payment_frequency', 'Not specified')],
-            ['<b>Reconciliation Deadline:</b>', cam_provisions.get('reconciliation_deadline', 'Not specified')],
-            ['<b>Audit Rights:</b>', 'Yes' if cam_provisions.get('tenant_audit_right') else 'No'],
+        # CAM Calculation Terms
+        elements.append(Paragraph("<b>CAM CALCULATION TERMS</b>", self.styles['SubsectionHeader']))
+        elements.append(Spacer(1, 0.1*inch))
+        
+        calc_terms = [
+            ['CAM Base Year:', str(cam_provisions.get('cam_base_year', 'Not specified'))],
+            ['CAM Stop Amount:', f"${cam_provisions.get('cam_stop_amount', 0):,.2f}" if cam_provisions.get('cam_stop_amount') else 'None'],
+            ['CAM Base Amount:', f"${cam_provisions.get('cam_base_amount', 0):,.2f}" if cam_provisions.get('cam_base_amount') else 'Not specified'],
+            ['', ''],
+            ['Tenant Square Footage:', f"{cam_provisions.get('tenant_square_footage', 0):,} SF" if cam_provisions.get('tenant_square_footage') else 'Not specified'],
+            ['Building Square Footage:', f"{cam_provisions.get('building_square_footage', 0):,} SF" if cam_provisions.get('building_square_footage') else 'Not specified'],
+            ['Tenant Pro-Rata Share:', f"{cam_provisions.get('tenant_prorata_share', 0)*100:.2f}%" if cam_provisions.get('tenant_prorata_share') else 'Not specified'],
         ]
         
-        if cam_provisions.get('excluded_items'):
-            excluded_str = ', '.join(cam_provisions['excluded_items'])
-            terms_data.append(['<b>Excluded Items:</b>', excluded_str])
-        
-        terms_table = Table(terms_data, colWidths=[2.5*inch, 4*inch])
-        terms_table.setStyle(TableStyle([
+        calc_table = Table(calc_terms, colWidths=[2.5*inch, 4*inch])
+        calc_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LINEABOVE', (0, 0), (-1, 0), 0.5, colors.grey),
-            ('LINEBELOW', (0, -1), (-1, -1), 0.5, colors.grey),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1f4788')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         
-        elements.append(terms_table)
+        elements.append(calc_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # CAM Caps & Limitations
+        elements.append(Paragraph("<b>CAM CAPS & LIMITATIONS</b>", self.styles['SubsectionHeader']))
+        elements.append(Spacer(1, 0.1*inch))
+        
+        if cam_provisions.get('has_cam_cap'):
+            cap_pct = cam_provisions.get('cam_cap_percentage', 0)
+            cap_text = f"Yes - {cap_pct}% maximum annual increase"
+        else:
+            cap_text = "No annual cap on CAM increases"
+        
+        cap_terms = [
+            ['Annual CAM Cap:', cap_text],
+        ]
+        
+        cap_table = Table(cap_terms, colWidths=[2.5*inch, 4*inch])
+        cap_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1f4788')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        
+        elements.append(cap_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Excluded Items
+        excluded = cam_provisions.get('excluded_items', [])
+        if excluded:
+            elements.append(Paragraph("<b>EXCLUDED ITEMS (Per Lease)</b>", self.styles['SubsectionHeader']))
+            elements.append(Spacer(1, 0.1*inch))
+            
+            excluded_text = "The following items are explicitly excluded from CAM charges per the lease agreement:\n\n"
+            for item in excluded:
+                excluded_text += f"  • {item}\n"
+            
+            elements.append(Paragraph(excluded_text, self.styles['CAMBodyText']))
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # Tenant Rights
+        elements.append(Paragraph("<b>TENANT RIGHTS & OBLIGATIONS</b>", self.styles['SubsectionHeader']))
+        elements.append(Spacer(1, 0.1*inch))
+        
+        rights_terms = [
+            ['Payment Frequency:', cam_provisions.get('cam_payment_frequency', 'Not specified')],
+            ['Reconciliation Deadline:', cam_provisions.get('reconciliation_deadline', 'Not specified')],
+            ['Tenant Audit Rights:', 'Yes - Tenant may audit CAM charges' if cam_provisions.get('tenant_audit_right') else 'Not specified or not granted'],
+            ['Audit Deadline:', cam_provisions.get('audit_deadline', 'N/A') if cam_provisions.get('tenant_audit_right') else 'N/A'],
+        ]
+        
+        rights_table = Table(rights_terms, colWidths=[2.5*inch, 4*inch])
+        rights_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1f4788')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        
+        elements.append(rights_table)
         
         return elements
 
