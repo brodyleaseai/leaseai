@@ -176,23 +176,14 @@ CREATE TABLE IF NOT EXISTS public.cam_dispute_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     reconciliation_id UUID NOT NULL REFERENCES public.cam_reconciliations(id) ON DELETE CASCADE,
     
-    -- Event Details
-    event_type VARCHAR(50) NOT NULL,
-    -- Types: DISPUTE_INITIATED, LETTER_SENT, LANDLORD_RESPONSE, NEGOTIATION_UPDATE, RESOLVED
-    
-    event_date DATE NOT NULL,
-    description TEXT,
-    
-    -- Amounts
-    amount_disputed DECIMAL(12,2),
-    amount_offered DECIMAL(12,2),
-    amount_recovered DECIMAL(12,2),
-    
-    -- Attachments
-    document_url TEXT,
+    -- Action/Event Details
+    action TEXT NOT NULL,  -- e.g., "Status updated to DISPUTE_FILED", "Dispute letter sent"
+    notes TEXT,            -- Additional notes/details about the action
     
     -- Metadata
-    created_by UUID,
+    performed_by TEXT,     -- User ID or username who performed the action
+    performed_at TIMESTAMP DEFAULT NOW(),
+    
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -220,6 +211,7 @@ CREATE INDEX IF NOT EXISTS idx_cam_uploads_status ON public.cam_statement_upload
 
 -- CAM Dispute History
 CREATE INDEX IF NOT EXISTS idx_cam_dispute_history_reconciliation_id ON public.cam_dispute_history(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_cam_dispute_history_performed_at ON public.cam_dispute_history(performed_at);
 
 -- ============================================================================
 -- PERMISSIONS
