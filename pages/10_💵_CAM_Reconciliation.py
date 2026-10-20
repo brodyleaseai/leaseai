@@ -396,7 +396,10 @@ with tab2:
                     
                     # Save button
                     if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary"):
+                        st.write("🔍 **Debug: Save button clicked**")
+                        
                         try:
+                            # Prepare record
                             recon_record = {
                                 'lease_id': selected_lease_id,
                                 'reconciliation_year': int(recon_year),
@@ -413,7 +416,18 @@ with tab2:
                                 'uploaded_at': datetime.now().isoformat()
                             }
                             
+                            # Show what we're trying to save (debug)
+                            with st.expander("🔍 Debug: Data being saved"):
+                                st.json(recon_record)
+                            
+                            st.write("🔄 Attempting to insert into database...")
+                            
+                            # Attempt insert
                             result = sb.table("cam_reconciliations").insert(recon_record).execute()
+                            
+                            st.write("✅ Insert command completed")
+                            st.write(f"📊 Result type: {type(result)}")
+                            st.write(f"📊 Result data: {result.data if hasattr(result, 'data') else 'No data attribute'}")
                             
                             if result.data:
                                 st.success("✅ CAM reconciliation saved successfully!")
@@ -423,21 +437,40 @@ with tab2:
                                 # Store success state to show on other tabs
                                 st.session_state['last_reconciliation_saved'] = True
                                 st.session_state['saved_reconciliation_id'] = result.data[0].get('id')
+                                
+                                # Show saved record
+                                with st.expander("📋 Saved Record Details"):
+                                    st.json(result.data[0])
                             else:
-                                st.warning("Save completed but no data returned. Please check the History tab.")
+                                st.warning("⚠️ Save completed but no data returned.")
+                                st.write("This might mean the save succeeded but Supabase didn't return the record.")
+                                st.info("Check the 'History' tab to see if the record appears.")
                             
                         except Exception as e:
-                            st.error(f"❌ Failed to save reconciliation: {str(e)}")
+                            st.error(f"❌ Failed to save reconciliation")
+                            st.error(f"**Error type:** {type(e).__name__}")
+                            st.error(f"**Error message:** {str(e)}")
+                            
+                            # Show full traceback for debugging
+                            import traceback
+                            with st.expander("🔍 Full Error Traceback"):
+                                st.code(traceback.format_exc())
                             
                             # More helpful error messages
                             error_str = str(e).lower()
                             if 'does not exist' in error_str or 'relation' in error_str:
-                                st.error("🗄️ Database tables not found. Please run the database schema script first.")
-                                st.code("See PHASE_2A_INSTRUCTIONS.md for database setup steps")
+                                st.error("🗄️ **Issue:** Database tables not found")
+                                st.info("**Solution:** Run the database schema script in Supabase SQL Editor")
                             elif 'permission denied' in error_str:
-                                st.error("🔒 Permission denied. Please run the GRANT statements in Supabase SQL Editor.")
-                            else:
-                                st.error(f"Full error: {str(e)}")
+                                st.error("🔒 **Issue:** Permission denied")
+                                st.info("**Solution:** Run GRANT statements in Supabase SQL Editor")
+                            elif 'foreign key' in error_str or 'violates' in error_str:
+                                st.error("🔗 **Issue:** Foreign key constraint violation")
+                                st.info("**Solution:** The lease_id might not exist in the leases table")
+                                st.write(f"Lease ID being used: {selected_lease_id}")
+                            elif 'null value' in error_str:
+                                st.error("⚠️ **Issue:** Required field is null")
+                                st.info("Check which fields are missing in the error message above")
                     
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
