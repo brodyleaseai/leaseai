@@ -125,6 +125,12 @@ tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "🔍 New Reconciliation", "📋 H
 with tab1:
     st.markdown("### CAM Reconciliation Overview")
     
+    # Show success message if just saved
+    if st.session_state.get('last_reconciliation_saved'):
+        st.success("✅ Reconciliation saved successfully! Dashboard metrics updated below.")
+        # Clear the flag
+        del st.session_state['last_reconciliation_saved']
+    
     # Fetch all reconciliations
     all_reconciliations = fetch_cam_reconciliations()
     
@@ -389,31 +395,49 @@ with tab2:
                         st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
                     
                     # Save button
-                    if st.button("💾 Save Reconciliation to Database", use_container_width=True):
+                    if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary"):
                         try:
                             recon_record = {
                                 'lease_id': selected_lease_id,
-                                'reconciliation_year': recon_year,
+                                'reconciliation_year': int(recon_year),
                                 'statement_date': statement_date.isoformat(),
-                                'landlord_total_charges': landlord_total,
-                                'landlord_tenant_share': tenant_share_billed,
-                                'calculated_total_charges': landlord_total,
-                                'calculated_tenant_share': calculated_share,
-                                'variance_amount': variance,
-                                'variance_percentage': discrepancy['variance_percentage'],
+                                'landlord_total_charges': float(landlord_total),
+                                'landlord_tenant_share': float(tenant_share_billed),
+                                'calculated_total_charges': float(landlord_total),
+                                'calculated_tenant_share': float(calculated_share),
+                                'variance_amount': float(variance),
+                                'variance_percentage': float(discrepancy['variance_percentage']),
                                 'status': 'UNDER_REVIEW',
                                 'dispute_status': 'NOT_DISPUTED' if abs(variance) < 100 else 'CHALLENGE_DRAFTED',
                                 'uploaded_by': st.session_state.get('user_id'),
                                 'uploaded_at': datetime.now().isoformat()
                             }
                             
-                            sb.table("cam_reconciliations").insert(recon_record).execute()
-                            st.success("✅ CAM reconciliation saved successfully!")
-                            st.info("View this reconciliation in the 'History' tab or generate a dispute letter if needed.")
+                            result = sb.table("cam_reconciliations").insert(recon_record).execute()
+                            
+                            if result.data:
+                                st.success("✅ CAM reconciliation saved successfully!")
+                                st.balloons()
+                                st.info("💡 Switch to the 'Dashboard' or 'History' tab to view your saved reconciliation.")
+                                
+                                # Store success state to show on other tabs
+                                st.session_state['last_reconciliation_saved'] = True
+                                st.session_state['saved_reconciliation_id'] = result.data[0].get('id')
+                            else:
+                                st.warning("Save completed but no data returned. Please check the History tab.")
                             
                         except Exception as e:
-                            st.error(f"Failed to save reconciliation: {str(e)}")
-                            st.info("The cam_reconciliations table may not exist. Please run the database schema script first.")
+                            st.error(f"❌ Failed to save reconciliation: {str(e)}")
+                            
+                            # More helpful error messages
+                            error_str = str(e).lower()
+                            if 'does not exist' in error_str or 'relation' in error_str:
+                                st.error("🗄️ Database tables not found. Please run the database schema script first.")
+                                st.code("See PHASE_2A_INSTRUCTIONS.md for database setup steps")
+                            elif 'permission denied' in error_str:
+                                st.error("🔒 Permission denied. Please run the GRANT statements in Supabase SQL Editor.")
+                            else:
+                                st.error(f"Full error: {str(e)}")
                     
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
