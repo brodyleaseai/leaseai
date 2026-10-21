@@ -9,21 +9,21 @@ Write-Host ""
 
 $baseUrl = "https://raw.githubusercontent.com/brodyleaseai/leaseai/main"
 $files = @(
-    @{Path="integrations/base.py"; Name="Integration Framework Base"},
-    @{Path="integrations/yardi.py"; Name="Yardi Voyager Integration"},
-    @{Path="integrations/mri.py"; Name="MRI Software Integration"},
-    @{Path="integrations/quickbooks.py"; Name="QuickBooks Online Integration"},
-    @{Path="integrations/docusign.py"; Name="DocuSign Integration"},
-    @{Path="integrations/notifications.py"; Name="Slack/Teams Notifications"},
-    @{Path="pages/13_Integrations.py"; Name="Integrations Management UI"},
-    @{Path="docs/INTEGRATIONS_SETUP_GUIDE.md"; Name="Integrations Setup Guide"}
+    @{Path="integrations/base.py"; Name="Integration Framework Base"; Url="integrations/base.py"},
+    @{Path="integrations/yardi.py"; Name="Yardi Voyager Integration"; Url="integrations/yardi.py"},
+    @{Path="integrations/mri.py"; Name="MRI Software Integration"; Url="integrations/mri.py"},
+    @{Path="integrations/quickbooks.py"; Name="QuickBooks Online Integration"; Url="integrations/quickbooks.py"},
+    @{Path="integrations/docusign.py"; Name="DocuSign Integration"; Url="integrations/docusign.py"},
+    @{Path="integrations/notifications.py"; Name="Slack/Teams Notifications"; Url="integrations/notifications.py"},
+    @{Path="pages/13_Integrations.py"; Name="Integrations Management UI"; Url="pages/13_%F0%9F%94%8C_Integrations.py"},
+    @{Path="docs/INTEGRATIONS_SETUP_GUIDE.md"; Name="Integrations Setup Guide"; Url="docs/INTEGRATIONS_SETUP_GUIDE.md"}
 )
 
 $successCount = 0
 $failCount = 0
 
 foreach ($file in $files) {
-    $url = "$baseUrl/$($file.Path)"
+    $url = "$baseUrl/$($file.Url)"
     $localPath = $file.Path
     $displayName = $file.Name
     
