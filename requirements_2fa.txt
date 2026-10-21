@@ -1,0 +1,7 @@
+# Additional dependencies for Phase 5B: 2FA Implementation
+# Add these to your existing requirements.txt
+
+# Two-Factor Authentication (TOTP)
+pyotp>=2.9.0  # TOTP/HOTP implementation
+qrcode[pil]>=7.4.2  # QR code generation for 2FA setup
+Pillow>=10.0.0  # Image processing for QR codes
