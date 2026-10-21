@@ -29,8 +29,8 @@ $files = @{
     # Database schema
     "database_schema_audit_security.sql" = "database_schema_audit_security.sql"
     
-    # Streamlit pages (URL encoded emoji)
-    "pages\12_🔒_Security_Dashboard.py" = "pages/12_%F0%9F%94%92_Security_Dashboard.py"
+    # Streamlit pages (URL encoded emoji - download with encoded name, then rename)
+    "pages\12_lock_Security_Dashboard.py" = "pages/12_%F0%9F%94%92_Security_Dashboard.py"
     
     # Documentation
     "docs\2FA_Setup_Guide.md" = "docs/2FA_Setup_Guide.md"
@@ -63,12 +63,23 @@ foreach ($localFile in $files.Keys) {
     
     try {
         Invoke-WebRequest -Uri $url -OutFile $localFile -ErrorAction Stop
-        Write-Host "  ✓ Success" -ForegroundColor Green
+        Write-Host "  [OK] Success" -ForegroundColor Green
         $successCount++
     }
     catch {
-        Write-Host "  ✗ Failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  [ERROR] Failed: $($_.Exception.Message)" -ForegroundColor Red
         $failCount++
+    }
+}
+
+# Rename the Security Dashboard file to include emoji
+if (Test-Path "pages\12_lock_Security_Dashboard.py") {
+    try {
+        Rename-Item "pages\12_lock_Security_Dashboard.py" "pages\12_🔒_Security_Dashboard.py" -ErrorAction Stop
+        Write-Host "  [OK] Renamed Security Dashboard to include emoji" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  [WARN] Could not rename to emoji filename (file works anyway)" -ForegroundColor Yellow
     }
 }
 
@@ -76,18 +87,18 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Installation Summary" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "✓ Successful: $successCount files" -ForegroundColor Green
+Write-Host "[OK] Successful: $successCount files" -ForegroundColor Green
 if ($failCount -gt 0) {
-    Write-Host "✗ Failed: $failCount files" -ForegroundColor Red
+    Write-Host "[ERROR] Failed: $failCount files" -ForegroundColor Red
 }
 Write-Host ""
 
 if ($failCount -eq 0) {
-    Write-Host "✓ Phase 5 installation complete!" -ForegroundColor Green
+    Write-Host "[OK] Phase 5 installation complete!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Next Steps:" -ForegroundColor Yellow
     Write-Host "1. Run the SQL schema in Supabase:" -ForegroundColor White
-    Write-Host "   - Open Supabase Dashboard → SQL Editor" -ForegroundColor Gray
+    Write-Host "   - Open Supabase Dashboard -> SQL Editor" -ForegroundColor Gray
     Write-Host "   - Copy contents of database_schema_audit_security.sql" -ForegroundColor Gray
     Write-Host "   - Paste and run in SQL Editor" -ForegroundColor Gray
     Write-Host ""
@@ -96,14 +107,14 @@ if ($failCount -eq 0) {
     Write-Host ""
     Write-Host "3. View Security Dashboard:" -ForegroundColor White
     Write-Host "   - Restart Streamlit app" -ForegroundColor Gray
-    Write-Host "   - Navigate to 🔒 Security Dashboard in sidebar" -ForegroundColor Gray
+    Write-Host "   - Navigate to Security Dashboard in sidebar" -ForegroundColor Gray
     Write-Host ""
     Write-Host "4. Review documentation:" -ForegroundColor White
     Write-Host "   - See docs\PHASE_5_README.md for complete guide" -ForegroundColor Gray
     Write-Host "   - Review SOC2_Gap_Analysis.md for roadmap" -ForegroundColor Gray
     Write-Host ""
 } else {
-    Write-Host "⚠ Installation completed with errors." -ForegroundColor Yellow
+    Write-Host "[WARN] Installation completed with errors." -ForegroundColor Yellow
     Write-Host "Please check the failed files and try again." -ForegroundColor Yellow
 }
 
