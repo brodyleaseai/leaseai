@@ -30,14 +30,18 @@ st.set_page_config(
 )
 
 # Authentication check
-if 'user' not in st.session_state:
-    st.error("⚠️ Please log in to access this page")
+if not st.session_state.get("authenticated", False):
+    st.warning("⚠️ Please log in from the Home page first.")
+    if st.button("← Go to Home"):
+        st.switch_page("Home.py")
     st.stop()
 
 # Admin check
-user_role = st.session_state.get('user', {}).get('role', 'user')
+user_role = st.session_state.get('user_role', 'user')
 if user_role != 'admin':
-    st.error("⚠️ Admin access required")
+    st.error("🚫 Admin access only. Please log in as an administrator.")
+    if st.button("← Go to Home"):
+        st.switch_page("Home.py")
     st.stop()
 
 st.title("🔌 Integrations Management")
