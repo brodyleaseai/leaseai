@@ -315,7 +315,7 @@ if st.session_state.bulk_upload_results:
     
     with col3:
         if st.button("🏠 Go to Home", use_container_width=True):
-            st.switch_page("app.py")
+            st.switch_page("Home.py")
 
 elif not uploaded_files:
     st.info("💡 Select multiple PDF files above to get started with bulk upload")
