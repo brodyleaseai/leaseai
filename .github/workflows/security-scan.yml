@@ -1,0 +1,145 @@
+name: Security Scan (SAST)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scan daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  bandit:
+    name: Bandit Security Scan
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml]
+          
+      - name: Run Bandit scan
+        run: |
+          bandit -r . \
+            -f json \
+            -o bandit-report.json \
+            -ll \
+            --exclude ./.venv,./venv,./env,./.git,./__pycache__,./node_modules,./.streamlit,./security_reports
+        continue-on-error: true
+        
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+          
+      - name: Check for HIGH severity issues
+        run: |
+          # Parse JSON report and fail if HIGH severity issues found
+          python -c "
+          import json
+          import sys
+          
+          with open('bandit-report.json', 'r') as f:
+              report = json.load(f)
+          
+          high_issues = [i for i in report.get('results', []) if i.get('issue_severity') == 'HIGH']
+          
+          if high_issues:
+              print(f'❌ Found {len(high_issues)} HIGH severity security issues:')
+              for issue in high_issues:
+                  print(f\"  - {issue['test_id']}: {issue['issue_text']}\")
+                  print(f\"    File: {issue['filename']}:{issue['line_number']}\")
+              sys.exit(1)
+          else:
+              print('✅ No HIGH severity security issues found')
+              sys.exit(0)
+          "
+          
+      - name: Generate summary
+        if: always()
+        run: |
+          python -c "
+          import json
+          
+          with open('bandit-report.json', 'r') as f:
+              report = json.load(f)
+          
+          results = report.get('results', [])
+          high = sum(1 for i in results if i.get('issue_severity') == 'HIGH')
+          medium = sum(1 for i in results if i.get('issue_severity') == 'MEDIUM')
+          low = sum(1 for i in results if i.get('issue_severity') == 'LOW')
+          
+          print(f'### Security Scan Summary')
+          print(f'')
+          print(f'| Severity | Count |')
+          print(f'|----------|-------|')
+          print(f'| 🔴 HIGH | {high} |')
+          print(f'| 🟠 MEDIUM | {medium} |')
+          print(f'| 🟡 LOW | {low} |')
+          print(f'| **TOTAL** | **{len(results)}** |')
+          " >> $GITHUB_STEP_SUMMARY
+
+  dependency-check:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Safety
+        run: |
+          pip install safety
+          
+      - name: Run Safety check
+        run: |
+          # Generate requirements file if not present
+          if [ -f requirements.txt ]; then
+            safety check --file requirements.txt --json > safety-report.json || true
+          else
+            echo "No requirements.txt found, skipping dependency scan"
+          fi
+        continue-on-error: true
+        
+      - name: Upload Safety report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: safety-vulnerability-report
+          path: safety-report.json
+
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for secret scanning
+          
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # Optional
