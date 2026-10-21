@@ -41,7 +41,7 @@ auth = AuthManager(sb)
 if not st.session_state.get("authenticated", False):
     st.warning("⚠️ Please log in from the Home page first.")
     if st.button("← Go to Home"):
-        st.switch_page("Home.py")
+        st.switch_page("app.py")
     st.stop()
 
 # Header

@@ -128,4 +128,4 @@ else:
 # Back button
 st.markdown("---")
 if st.button("← Back to Dashboard"):
-    st.switch_page("Home.py")
+    st.switch_page("app.py")

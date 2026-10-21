@@ -37,14 +37,14 @@ auth = AuthManager(sb)
 if not st.session_state.get("authenticated", False):
     st.warning("⚠️ Please log in from the Home page first.")
     if st.button("← Go to Home"):
-        st.switch_page("Home.py")
+        st.switch_page("app.py")
     st.stop()
 
 # Check admin role
 if st.session_state.get("user_role") != "admin":
     st.error("🚫 Admin access only. Please log in as an administrator.")
     if st.button("← Go to Home"):
-        st.switch_page("Home.py")
+        st.switch_page("app.py")
     st.stop()
 
 # Header
@@ -55,7 +55,7 @@ with col2:
     st.write(f"👤 {st.session_state.get('user_name', 'Admin')}")
     if st.button("Logout", use_container_width=True):
         auth.logout()
-        st.switch_page("Home.py")
+        st.switch_page("app.py")
 
 st.markdown("---")
 
