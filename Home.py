@@ -135,22 +135,61 @@ if not st.session_state.get("authenticated", False):
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        with st.form("login_form"):
-            username = st.text_input("Email", placeholder="your.email@company.com")
-            password = st.text_input("Password", type="password", placeholder="Enter password")
-            submit = st.form_submit_button("Sign In", use_container_width=True, type="primary")
-            
-            if submit:
-                if username and password:
-                    success, role, message = auth.login(username, password)
-                    
-                    if success:
-                        st.success(f"✅ {message}")
-                        st.rerun()
+        needs_2fa = st.session_state.get("needs_2fa_verification", False)
+        pending_username = st.session_state.get("pending_2fa_username")
+        pending_password = st.session_state.get("pending_2fa_password")
+
+        if needs_2fa and pending_username and pending_password:
+            st.info("Two-factor authentication required. Enter the 6-digit code from your authenticator app.")
+            with st.form("home_2fa_form"):
+                totp_code = st.text_input("Verification Code", max_chars=6, placeholder="000000")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    verify = st.form_submit_button("Verify & Sign In", use_container_width=True, type="primary")
+                with col_b:
+                    cancel = st.form_submit_button("Cancel", use_container_width=True)
+
+                if cancel:
+                    st.session_state.needs_2fa_verification = False
+                    st.session_state.pending_2fa_username = None
+                    st.session_state.pending_2fa_password = None
+                    st.rerun()
+
+                if verify:
+                    if totp_code and len(totp_code) == 6:
+                        success, role, message, _ = auth.login(pending_username, pending_password, totp_code)
+                        if success:
+                            st.session_state.needs_2fa_verification = False
+                            st.session_state.pending_2fa_username = None
+                            st.session_state.pending_2fa_password = None
+                            st.success(f"✅ {message}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
                     else:
-                        st.error(f"❌ {message}")
-                else:
-                    st.warning("Please enter both email and password")
+                        st.warning("Please enter a 6-digit code")
+        else:
+            with st.form("login_form"):
+                username = st.text_input("Email", placeholder="your.email@company.com")
+                password = st.text_input("Password", type="password", placeholder="Enter password")
+                submit = st.form_submit_button("Sign In", use_container_width=True, type="primary")
+                
+                if submit:
+                    if username and password:
+                        success, role, message, needs_2fa_next = auth.login(username, password)
+                        
+                        if needs_2fa_next:
+                            st.session_state.needs_2fa_verification = True
+                            st.session_state.pending_2fa_username = username
+                            st.session_state.pending_2fa_password = password
+                            st.rerun()
+                        elif success:
+                            st.success(f"✅ {message}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+                    else:
+                        st.warning("Please enter both email and password")
     
     st.stop()
 
