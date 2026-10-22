@@ -76,8 +76,16 @@ class TwoFactorAuth:
         Returns:
             True if valid, False otherwise
         """
+        if not secret or token is None:
+            return False
+
+        cleaned = "".join(ch for ch in str(token) if ch.isdigit())
+        if len(cleaned) != 6:
+            return False
+
         totp = pyotp.TOTP(secret)
-        return totp.verify(token, valid_window=1)  # Allow 30-second window
+        # Window of 2 allows +/- 60 seconds for phone vs PC clock drift
+        return totp.verify(cleaned, valid_window=2)
     
     def enable_2fa(self, user_id: str, user_email: str, secret: str) -> Tuple[bool, str]:
         """
@@ -358,26 +366,24 @@ def render_2fa_setup_page(supabase_client: Client, user_id: str, user_email: str
                 max_chars=6,
                 placeholder="000000"
             )
+            st.caption("Use the current code. If it fails, wait for the next code and check that your iPhone and PC clocks are set automatically.")
             
             col_a, col_b = st.columns(2)
             
             with col_a:
                 if st.button("Verify and Enable 2FA", type="primary", use_container_width=True):
-                    if len(verification_code) == 6:
-                        if tfa.verify_token(secret, verification_code):
-                            success, message = tfa.enable_2fa(user_id, user_email, secret)
-                            if success:
-                                st.success("✅ 2FA enabled successfully!")
-                                # Clear session state
-                                del st.session_state["2fa_secret"]
-                                del st.session_state["show_2fa_setup"]
-                                st.rerun()
-                            else:
-                                st.error(message)
+                    if tfa.verify_token(secret, verification_code):
+                        success, message = tfa.enable_2fa(user_id, user_email, secret)
+                        if success:
+                            st.success("✅ 2FA enabled successfully!")
+                            # Clear session state
+                            del st.session_state["2fa_secret"]
+                            del st.session_state["show_2fa_setup"]
+                            st.rerun()
                         else:
-                            st.error("❌ Invalid code. Please try again.")
+                            st.error(message)
                     else:
-                        st.warning("⚠️ Please enter a 6-digit code")
+                        st.error("Invalid code. Wait for a fresh 6-digit code, confirm iPhone Date & Time is set automatically, then try again.")
             
             with col_b:
                 if st.button("Cancel", use_container_width=True):
