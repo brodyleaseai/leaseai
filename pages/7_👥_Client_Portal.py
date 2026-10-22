@@ -241,17 +241,23 @@ with st.expander("📖 How to Use LeaseAI"):
     """)
 
 with st.expander("💰 Billing Information"):
-    st.markdown("""
-    ### Current Plan
-    
-    **Professional Plan** - $99/month
-    - Unlimited lease uploads
-    - 84-field extraction
-    - Amendment tracking
-    - ASC 842 compliance calculations
-    - Priority support
-    
-    ### Billing History
-    
-    *Billing integration coming soon*
-    """)
+    try:
+        from payment_integration import get_client_billing
+        from usage_limits import check_can_upload
+        billing = get_client_billing(sb, st.session_state.get("user_id"))
+        _ok, usage_msg, usage = check_can_upload(
+            sb, st.session_state.get("user_id"), st.session_state.get("user_role")
+        )
+        st.markdown(f"**Plan:** {(billing.get('plan_tier') or 'none').title()}")
+        st.markdown(f"**Status:** {(billing.get('subscription_status') or 'none').title()}")
+        limit = usage.get("limit")
+        used = usage.get("used") or 0
+        if limit is None:
+            st.markdown(f"**Usage:** {used} leases this month (unlimited)")
+        else:
+            st.markdown(f"**Usage:** {used} / {limit} leases this month")
+        st.caption(usage_msg)
+    except Exception:
+        st.info("Billing details will appear after the billing schema is applied.")
+    if st.button("Open Billing", key="portal_open_billing"):
+        st.switch_page("pages/15_💳_Billing.py")

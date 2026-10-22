@@ -144,6 +144,20 @@ if uploaded_files and client_id:
         st.warning("⚠️ Maximum 10 files at once. Please select fewer files.")
     else:
         if st.button("🚀 Process All Leases", type="primary", use_container_width=True):
+            from usage_limits import check_can_upload, increment_usage
+            can_upload, limit_message, usage_info = check_can_upload(
+                sb, client_id, st.session_state.get("user_role")
+            )
+            remaining = usage_info.get("remaining")
+            if not can_upload:
+                st.error(limit_message)
+                st.stop()
+            if remaining is not None and len(uploaded_files) > remaining:
+                st.error(
+                    f"This batch has {len(uploaded_files)} files but only {remaining} "
+                    "abstractions remain this month. Remove files or upgrade on Billing."
+                )
+                st.stop()
             st.session_state.bulk_upload_results = []
             
             # Create progress containers
@@ -178,6 +192,7 @@ if uploaded_files and client_id:
                             filename=filename
                         )
                         
+                        increment_usage(sb, client_id)
                         return {
                             "filename": filename,
                             "status": "success",

@@ -130,6 +130,42 @@ if recent_leases.data:
 else:
     st.info("No leases found.")
 
+# Sales metrics
+st.markdown("---")
+st.subheader("Sales Metrics")
+try:
+    client_rows = sb.table("clients").select(
+        "id, plan_tier, subscription_status, billing_interval"
+    ).execute().data or []
+    active = [c for c in client_rows if (c.get("subscription_status") or "") in ("active", "trialing")]
+    plan_mrr = {"starter": 2500, "growth": 6000, "enterprise": 15000}
+    mrr = 0
+    for row in active:
+        monthly = plan_mrr.get((row.get("plan_tier") or "").lower(), 0)
+        if (row.get("billing_interval") or "") == "annual":
+            monthly = int(monthly * 10 / 12)
+        mrr += monthly
+    new_month = 0
+    try:
+        from datetime import datetime as _dt
+        start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        created = sb.table("clients").select("id").gte("created_at", start).execute().data or []
+        new_month = len(created)
+    except Exception:
+        new_month = 0
+    canceled = [c for c in client_rows if (c.get("subscription_status") or "") == "canceled"]
+    churn = (len(canceled) / max(len(client_rows), 1)) * 100
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("MRR", f"${mrr:,.0f}")
+    m2.metric("ARR", f"${mrr * 12:,.0f}")
+    m3.metric("Active subscriptions", len(active))
+    m4.metric("New clients this month", new_month)
+    st.caption(f"Canceled share of all clients: {churn:.1f}%")
+    if st.button("Open Billing"):
+        st.switch_page("pages/15_💳_Billing.py")
+except Exception:
+    st.caption("Apply database_schema_billing.sql to see live MRR and ARR.")
+
 # Quick Actions
 st.markdown("---")
 st.subheader("⚡ Quick Actions")

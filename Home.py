@@ -194,6 +194,15 @@ if not st.session_state.get("authenticated", False):
     st.stop()
 
 # User is authenticated - show dashboard
+try:
+    _payment = st.query_params.get("payment")
+    if _payment == "success":
+        st.success("Payment received. Open Billing to confirm your plan is active.")
+    elif _payment == "cancelled":
+        st.warning("Checkout cancelled. No charge was made.")
+except Exception:
+    pass
+
 # Header with user info
 col_header1, col_header2 = st.columns([4, 1])
 
@@ -395,7 +404,8 @@ if user_role == "admin":
             st.switch_page("pages/6_📅_Critical_Dates.py")
     
     with col7:
-        st.button("💳 Billing", use_container_width=True, disabled=True, help="Coming soon")
+        if st.button("💳 Billing", use_container_width=True):
+            st.switch_page("pages/15_💳_Billing.py")
     
     with col8:
         st.button("📊 Analytics", use_container_width=True, disabled=True, help="Coming soon")
@@ -414,6 +424,9 @@ else:  # Client role
     with col3:
         if st.button("📋 My Leases", use_container_width=True):
             st.switch_page("pages/2_📋_Lease_Review.py")
+
+    if st.button("💳 Billing", use_container_width=True):
+        st.switch_page("pages/15_💳_Billing.py")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 

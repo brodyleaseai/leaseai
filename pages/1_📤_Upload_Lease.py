@@ -116,44 +116,53 @@ if submitted:
     elif not client_id:
         st.error("Please select a client")
     else:
-        with st.spinner("Processing lease with OCR and AI extraction... This may take 30-60 seconds..."):
-            # Save uploaded file temporarily
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
-            
-            try:
-                # Process lease
-                from extraction_pipeline import LeaseExtractionPipeline
+        from usage_limits import check_can_upload, increment_usage
+        can_upload, limit_message, _usage = check_can_upload(
+            sb,
+            client_id,
+            st.session_state.get("user_role"),
+        )
+        if not can_upload:
+            st.error(limit_message)
+            if st.button("Go to Billing"):
+                st.switch_page("pages/15_💳_Billing.py")
+        else:
+            with st.spinner("Processing lease with OCR and AI extraction... This may take 30-60 seconds..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
                 
-                pipeline = LeaseExtractionPipeline()
-                lease_id, extracted_fields = pipeline.process_lease(
-                    pdf_path=tmp_path,
-                    client_id=client_id,
-                    supabase_client=sb,
-                    property_address=property_address,
-                    tenant_name=tenant_name,
-                    filename=uploaded_file.name
-                )
+                try:
+                    from extraction_pipeline import LeaseExtractionPipeline
+                    
+                    pipeline = LeaseExtractionPipeline()
+                    lease_id, extracted_fields = pipeline.process_lease(
+                        pdf_path=tmp_path,
+                        client_id=client_id,
+                        supabase_client=sb,
+                        property_address=property_address,
+                        tenant_name=tenant_name,
+                        filename=uploaded_file.name
+                    )
+                    
+                    increment_usage(sb, client_id)
+                    
+                    st.session_state.last_processed_lease = {
+                        "lease_id": lease_id,
+                        "extracted_fields": extracted_fields
+                    }
+                    
+                    st.success("Lease processed successfully!")
+                    st.success(f"Lease ID: {lease_id}")
+                    
+                except Exception as e:
+                    st.error(f"Error processing lease: {str(e)}")
+                    import traceback
+                    with st.expander("Error Details"):
+                        st.code(traceback.format_exc())
                 
-                # Store in session state for display after form
-                st.session_state.last_processed_lease = {
-                    "lease_id": lease_id,
-                    "extracted_fields": extracted_fields
-                }
-                
-                st.success(f"✅ Lease processed successfully!")
-                st.success(f"Lease ID: {lease_id}")
-                
-            except Exception as e:
-                st.error(f"❌ Error processing lease: {str(e)}")
-                import traceback
-                with st.expander("Error Details"):
-                    st.code(traceback.format_exc())
-            
-            finally:
-                # Clean up temp file
-                os.unlink(tmp_path)
+                finally:
+                    os.unlink(tmp_path)
 
 # Display results if available (OUTSIDE the form)
 if st.session_state.last_processed_lease:
