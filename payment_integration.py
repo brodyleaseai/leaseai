@@ -80,7 +80,6 @@ class PaymentHandler:
 
         session_kwargs = {
             "mode": "subscription",
-            "payment_method_types": ["card"],
         }
         if customer_id:
             session_kwargs["customer"] = customer_id
