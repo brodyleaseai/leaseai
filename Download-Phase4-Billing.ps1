@@ -41,23 +41,12 @@ foreach ($file in $plain) {
     }
 }
 
-Write-Host "Updating emoji-named pages via Python..." -NoNewline
-$py = @'
-import urllib.request
-base = "https://raw.githubusercontent.com/brodyleaseai/leaseai/main"
-files = [
-    ("pages/15_%F0%9F%92%B3_Billing.py", "pages/15_\U0001f4b3_Billing.py"),
-    ("pages/1_%F0%9F%93%A4_Upload_Lease.py", "pages/1_\U0001f4e4_Upload_Lease.py"),
-    ("pages/4_%F0%9F%93%8A_Admin_Dashboard.py", "pages/4_\U0001f4ca_Admin_Dashboard.py"),
-    ("pages/7_%F0%9F%91%A5_Client_Portal.py", "pages/7_\U0001f465_Client_Portal.py"),
-    ("pages/9_%F0%9F%93%A6_Bulk_Upload.py", "pages/9_\U0001f4e6_Bulk_Upload.py"),
-]
-for url_path, dest in files:
-    urllib.request.urlretrieve(base + "/" + url_path, dest)
-print("OK")
-'@
+Write-Host "Downloading: Phase 4 page updater..." -NoNewline
 try {
-    python -c $py
+    Invoke-WebRequest -Uri "$baseUrl/download_phase4_pages.py" -OutFile "download_phase4_pages.py" -ErrorAction Stop
+    Write-Host " OK" -ForegroundColor Green
+    Write-Host "Updating emoji-named pages..." -NoNewline
+    python download_phase4_pages.py
     $successCount += 5
 }
 catch {
