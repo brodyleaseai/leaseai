@@ -176,6 +176,7 @@ if uploaded_files and client_id:
                     try:
                         # Import and run extraction
                         from extraction_pipeline import LeaseExtractionPipeline
+                        from extraction_timeout import run_extraction_with_timeout
                         
                         pipeline = LeaseExtractionPipeline()
                         
@@ -183,7 +184,8 @@ if uploaded_files and client_id:
                         property_address = filename.replace('.pdf', '').replace('_', ' ')
                         tenant_name = "To be reviewed"
                         
-                        lease_id, extracted_fields = pipeline.process_lease(
+                        lease_id, extracted_fields = run_extraction_with_timeout(
+                            pipeline,
                             pdf_path=tmp_path,
                             client_id=client_id,
                             supabase_client=sb,

@@ -9,6 +9,12 @@ from supabase import create_client
 import config
 from auth_module import AuthManager
 
+try:
+    from observability import init_observability
+    init_observability()
+except Exception:
+    pass
+
 # Page config
 st.set_page_config(
     page_title="LeaseAI | Enterprise Lease Management",

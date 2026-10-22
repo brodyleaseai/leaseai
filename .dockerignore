@@ -1,0 +1,11 @@
+.git
+.github
+__pycache__
+*.pyc
+.env
+.streamlit/secrets.toml
+*.pdf
+.DS_Store
+security_reports
+opt
+.tmp

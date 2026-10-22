@@ -134,9 +134,11 @@ if submitted:
                 
                 try:
                     from extraction_pipeline import LeaseExtractionPipeline
+                    from extraction_timeout import run_extraction_with_timeout
                     
                     pipeline = LeaseExtractionPipeline()
-                    lease_id, extracted_fields = pipeline.process_lease(
+                    lease_id, extracted_fields = run_extraction_with_timeout(
+                        pipeline,
                         pdf_path=tmp_path,
                         client_id=client_id,
                         supabase_client=sb,

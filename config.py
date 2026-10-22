@@ -41,6 +41,10 @@ APP_NAME = "LeaseAI"
 COMPANY_NAME = "KitschCo"
 COMPANY_LOCATION = "Vancouver, BC"
 APP_URL = os.getenv("APP_URL", "https://leaseai.streamlit.app")  # Update with your actual deployed URL
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+EXTRACTION_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "300"))
+LEASEAI_ENV = os.getenv("LEASEAI_ENV", "development")
 
 # AWS Configuration (for Textract OCR)
 # Optional: Leave empty to use Tesseract fallback or AWS CLI default credentials

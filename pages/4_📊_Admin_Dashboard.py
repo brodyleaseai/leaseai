@@ -64,9 +64,10 @@ st.subheader("📈 Platform Overview")
 
 col1, col2, col3, col4 = st.columns(4)
 
+from query_cache import cached
+
 # Total leases
-leases_response = sb.table("leases").select("id, status").execute()
-leases = leases_response.data or []
+leases = cached("admin_leases_status", 45, lambda: (sb.table("leases").select("id, status").execute().data or []))
 total_leases = len(leases)
 
 # Pending review
