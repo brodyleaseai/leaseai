@@ -83,6 +83,9 @@ class PaymentHandler:
 
         session_kwargs = {
             "mode": "subscription",
+            # Account default is Managed Payments, which rejects inline price_data
+            # products without a pre-created tax code. Disable it on this session.
+            "managed_payments": {"enabled": False},
         }
         if customer_id:
             session_kwargs["customer"] = customer_id
