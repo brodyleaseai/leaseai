@@ -174,7 +174,90 @@ class PaymentHandler:
 
     def list_invoices(self, stripe_customer_id: str, limit: int = 12) -> list:
         invoices = stripe.Invoice.list(customer=stripe_customer_id, limit=limit)
-        return invoices.get("data", [])
+        return list(getattr(invoices, "data", None) or [])
+
+    def sync_subscription_from_stripe(
+        self,
+        client_id: Optional[str],
+        email: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Pull the latest Stripe subscription onto the client row. Used when webhooks are not running."""
+        customer_id = None
+        if self.sb and client_id:
+            try:
+                row = (
+                    self.sb.table("clients")
+                    .select("stripe_customer_id, email")
+                    .eq("id", client_id)
+                    .limit(1)
+                    .execute()
+                )
+                if row.data:
+                    customer_id = row.data[0].get("stripe_customer_id")
+                    email = email or row.data[0].get("email")
+            except Exception:
+                pass
+
+        if not customer_id and email:
+            customers = stripe.Customer.list(email=email, limit=5)
+            matches = list(getattr(customers, "data", None) or [])
+            if matches:
+                customer_id = matches[0].id
+                if self.sb and client_id:
+                    try:
+                        self.sb.table("clients").update(
+                            {"stripe_customer_id": customer_id}
+                        ).eq("id", client_id).execute()
+                    except Exception:
+                        pass
+
+        if not customer_id:
+            return None
+
+        subscriptions = stripe.Subscription.list(customer=customer_id, status="all", limit=10)
+        items = list(getattr(subscriptions, "data", None) or [])
+        if not items:
+            return None
+
+        preferred = None
+        for item in items:
+            status = item.get("status") if isinstance(item, dict) else item["status"]
+            if status in ("active", "trialing", "past_due"):
+                preferred = item
+                break
+        if preferred is None:
+            preferred = items[0]
+
+        payload = preferred.to_dict() if hasattr(preferred, "to_dict") else dict(preferred)
+        metadata = payload.get("metadata") or {}
+        plan_tier = metadata.get("plan_tier") or self._infer_plan_tier(payload)
+        billing_interval = metadata.get("billing_interval") or self._infer_interval(payload)
+
+        self.apply_subscription_to_client(
+            client_id=client_id,
+            stripe_customer_id=customer_id,
+            subscription_obj=payload,
+            plan_tier=plan_tier,
+            billing_interval=billing_interval,
+        )
+        return payload
+
+    def _infer_plan_tier(self, subscription_obj: Dict[str, Any]) -> str:
+        try:
+            amount = subscription_obj["items"]["data"][0]["price"]["unit_amount"]
+        except Exception:
+            return "starter"
+        for key, plan in self.PLANS.items():
+            if amount in (plan["monthly_amount"], plan["annual_amount"]):
+                return key
+        return "starter"
+
+    def _infer_interval(self, subscription_obj: Dict[str, Any]) -> str:
+        try:
+            interval = subscription_obj["items"]["data"][0]["price"]["recurring"]["interval"]
+            return "annual" if interval == "year" else "monthly"
+        except Exception:
+            return "monthly"
 
     def _ensure_customer(self, email: str, client_id: Optional[str]) -> Optional[str]:
         if self.sb and client_id:
@@ -216,6 +299,9 @@ class PaymentHandler:
     ) -> None:
         if not self.sb:
             return
+
+        if hasattr(subscription_obj, "to_dict"):
+            subscription_obj = subscription_obj.to_dict()
 
         metadata = subscription_obj.get("metadata") or {}
         plan_tier = plan_tier or metadata.get("plan_tier") or "starter"

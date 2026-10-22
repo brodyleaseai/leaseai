@@ -50,6 +50,20 @@ if user_role == "admin":
         client_id = labels[picked]
     st.sidebar.caption("Admins can subscribe or manage billing for any client.")
 
+if handler.is_configured():
+    try:
+        lookup_email = user_email
+        if user_role == "admin" and client_id:
+            try:
+                row = sb.table("clients").select("email").eq("id", client_id).limit(1).execute()
+                if row.data:
+                    lookup_email = row.data[0].get("email") or user_email
+            except Exception:
+                pass
+        handler.sync_subscription_from_stripe(client_id, email=lookup_email)
+    except Exception as exc:
+        st.caption(f"Could not refresh plan from Stripe: {exc}")
+
 billing = get_client_billing(sb, client_id)
 allowed, usage_msg, usage = check_can_upload(sb, client_id, user_role)
 
@@ -204,16 +218,16 @@ with tab3:
 
     if not invoices and billing.get("stripe_customer_id") and handler.is_configured():
         try:
-            invoices = [
-                {
-                    "stripe_invoice_id": inv.get("id"),
-                    "amount_paid_cents": inv.get("amount_paid"),
-                    "status": inv.get("status"),
-                    "hosted_invoice_url": inv.get("hosted_invoice_url"),
-                    "created_at": datetime.utcfromtimestamp(inv.get("created", 0)).isoformat(),
-                }
-                for inv in handler.list_invoices(billing["stripe_customer_id"])
-            ]
+            invoices = []
+            for inv in handler.list_invoices(billing["stripe_customer_id"]):
+                data = inv.to_dict() if hasattr(inv, "to_dict") else dict(inv)
+                invoices.append({
+                    "stripe_invoice_id": data.get("id"),
+                    "amount_paid_cents": data.get("amount_paid"),
+                    "status": data.get("status"),
+                    "hosted_invoice_url": data.get("hosted_invoice_url"),
+                    "created_at": datetime.utcfromtimestamp(data.get("created") or 0).isoformat(),
+                })
         except Exception as exc:
             st.caption(f"Could not load Stripe invoices: {exc}")
 
