@@ -81,9 +81,14 @@ with tab1:
     st.markdown("### Latest Portfolio Health Report")
     
     # Get most recent report
-    report_response = sb.table("portfolio_health_reports").select("*").order("report_date", desc=True).limit(1).execute()
+    from query_cache import cached
+    report_response_data = cached(
+        f"health_report_latest_{client_id}",
+        60,
+        lambda: (sb.table("portfolio_health_reports").select("*").order("report_date", desc=True).limit(1).execute().data or []),
+    )
     
-    if not report_response.data:
+    if not report_response_data:
         st.info("📊 No health report generated yet.")
         
         col1, col2 = st.columns(2)
@@ -120,7 +125,7 @@ with tab1:
             st.caption("Generate a comprehensive health report analyzing your entire portfolio for issues, deadlines, and opportunities.")
     
     else:
-        report = report_response.data[0]
+        report = report_response_data[0]
         
         # Header with health score
         col1, col2, col3 = st.columns([2, 1, 1])

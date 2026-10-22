@@ -18,6 +18,14 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_extracted_fields_lease_id ON extracted_fields(lease_id);
 
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'critical_dates') THEN
+        CREATE INDEX IF NOT EXISTS idx_critical_dates_date_value ON critical_dates(date_value);
+        CREATE INDEX IF NOT EXISTS idx_critical_dates_lease_id ON critical_dates(lease_id);
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS application_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type TEXT NOT NULL,

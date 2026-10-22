@@ -59,8 +59,12 @@ with tab1:
     
     # Fetch all leases with critical dates
     try:
-        critical_dates_response = sb.table("critical_dates").select("*, leases(filename, clients(name))").order("date_value").execute()
-        critical_dates = critical_dates_response.data or []
+        from query_cache import cached
+        critical_dates = cached(
+            "critical_dates_all",
+            45,
+            lambda: (sb.table("critical_dates").select("*, leases(filename, clients(name))").order("date_value").execute().data or []),
+        )
         
         if critical_dates:
             # Filter by date range

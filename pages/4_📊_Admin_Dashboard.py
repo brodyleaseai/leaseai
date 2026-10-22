@@ -93,10 +93,14 @@ st.markdown("---")
 # Recent Activity
 st.subheader("📋 Recent Leases")
 
-recent_leases = sb.table("leases").select("*, clients(name)").order("created_at", desc=True).limit(10).execute()
+recent_leases_data = cached(
+    "admin_recent_leases",
+    30,
+    lambda: (sb.table("leases").select("*, clients(name)").order("created_at", desc=True).limit(10).execute().data or []),
+)
 
-if recent_leases.data:
-    for lease in recent_leases.data:
+if recent_leases_data:
+    for lease in recent_leases_data:
         col_a, col_b, col_c, col_d = st.columns([3, 2, 2, 1])
         
         with col_a:
@@ -135,9 +139,13 @@ else:
 st.markdown("---")
 st.subheader("Sales Metrics")
 try:
-    client_rows = sb.table("clients").select(
-        "id, plan_tier, subscription_status, billing_interval"
-    ).execute().data or []
+    client_rows = cached(
+        "admin_clients_billing",
+        60,
+        lambda: (sb.table("clients").select(
+            "id, plan_tier, subscription_status, billing_interval, created_at"
+        ).execute().data or []),
+    )
     active = [c for c in client_rows if (c.get("subscription_status") or "") in ("active", "trialing")]
     plan_mrr = {"starter": 2500, "growth": 6000, "enterprise": 15000}
     mrr = 0
@@ -146,14 +154,17 @@ try:
         if (row.get("billing_interval") or "") == "annual":
             monthly = int(monthly * 10 / 12)
         mrr += monthly
+    from datetime import datetime as _dt
+    start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     new_month = 0
-    try:
-        from datetime import datetime as _dt
-        start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
-        created = sb.table("clients").select("id").gte("created_at", start).execute().data or []
-        new_month = len(created)
-    except Exception:
-        new_month = 0
+    for row in client_rows:
+        created_at = row.get("created_at") or ""
+        try:
+            created_dt = _dt.fromisoformat(str(created_at).replace("Z", "+00:00")).replace(tzinfo=None)
+            if created_dt >= start:
+                new_month += 1
+        except Exception:
+            pass
     canceled = [c for c in client_rows if (c.get("subscription_status") or "") == "canceled"]
     churn = (len(canceled) / max(len(client_rows), 1)) * 100
     m1, m2, m3, m4 = st.columns(4)

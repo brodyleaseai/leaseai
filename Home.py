@@ -440,10 +440,15 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("## 📈 Recent Activity")
 
 try:
-    recent_leases = sb.table("leases").select("*").order("created_at", desc=True).limit(5).execute()
+    from query_cache import cached
+    recent_leases_data = cached(
+        "home_recent_leases",
+        30,
+        lambda: (sb.table("leases").select("*").order("created_at", desc=True).limit(5).execute().data or []),
+    )
     
-    if recent_leases.data:
-        for lease in recent_leases.data:
+    if recent_leases_data:
+        for lease in recent_leases_data:
             status_emoji = {
                 "READY FOR REVIEW": "🟡",
                 "APPROVED": "🟢",

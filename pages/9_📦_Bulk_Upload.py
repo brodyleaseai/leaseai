@@ -103,8 +103,12 @@ with col2:
     
     # Get clients for dropdown
     try:
-        clients_response = sb.table("clients").select("id, name").execute()
-        clients = clients_response.data or []
+        from query_cache import cached
+        clients = cached(
+            "bulk_upload_clients",
+            120,
+            lambda: (sb.table("clients").select("id, name").execute().data or []),
+        )
         
         if clients:
             client_options = {client['name']: client['id'] for client in clients}
