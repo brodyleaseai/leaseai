@@ -17,6 +17,9 @@ import config
 stripe.api_key = config.STRIPE_SECRET_KEY
 
 APP_URL = getattr(config, "APP_URL", "http://localhost:8501")
+# Stripe tax code: Software as a service (SaaS) — business use
+# Required when Managed Payments is enabled on the Stripe account.
+SAAS_TAX_CODE = "txcd_10103000"
 
 
 class PaymentHandler:
@@ -95,6 +98,7 @@ class PaymentHandler:
                         "product_data": {
                             "name": f"LeaseAI {plan['name']}",
                             "description": plan["description"],
+                            "tax_code": SAAS_TAX_CODE,
                         },
                         "unit_amount": amount,
                         "recurring": {"interval": interval},
@@ -145,7 +149,7 @@ class PaymentHandler:
             currency=plan["currency"],
             unit_amount=amount,
             recurring={"interval": interval},
-            product_data={"name": f"LeaseAI {plan['name']}"},
+            product_data={"name": f"LeaseAI {plan['name']}", "tax_code": SAAS_TAX_CODE},
         )
 
         updated = stripe.Subscription.modify(
