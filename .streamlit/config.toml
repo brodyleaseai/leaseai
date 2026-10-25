@@ -1,7 +1,10 @@
 [server]
-headless = true
+# false = Streamlit opens the browser on your PC.
+# Docker/Cloud still run headless via STREAMLIT_SERVER_HEADLESS=true.
+headless = false
 port = 8501
-enableCORS = false
+address = "localhost"
+enableCORS = true
 enableXsrfProtection = true
 maxUploadSize = 50
 
