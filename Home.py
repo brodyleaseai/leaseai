@@ -415,7 +415,7 @@ if user_role == "admin":
     
     with col8:
         if st.button("🗑️ Delete Leases", use_container_width=True):
-            st.switch_page("pages/2_📋_Lease_Review.py")
+            st.switch_page("pages/16_Delete_Leases.py")
 
 else:  # Client role
     col1, col2, col3 = st.columns(3)
