@@ -125,6 +125,10 @@ def update_lease_status(lease_id, status):
         "reviewed_at": datetime.utcnow().isoformat(),
     }).eq("id", lease_id).execute()
 
+def can_delete_leases():
+    role = (st.session_state.get("user_role") or "").lower()
+    return role in ("", "admin")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAV
@@ -397,7 +401,9 @@ if page == "📋 Lease Dashboard":
             pages       = lease.get("page_count") or "—"
             lease_id    = lease["id"]
 
-            col_a, col_b, col_c, col_d, col_e = st.columns([3, 2, 1, 2, 1])
+            col_sel, col_a, col_b, col_c, col_d, col_e = st.columns([0.4, 3, 2, 1, 2, 1])
+            with col_sel:
+                st.checkbox("Select", key=f"sel_{lease_id}", label_visibility="collapsed")
             with col_a:
                 st.markdown(f"**{filename}**  \n<span style='color:#8892b0;font-size:0.8rem;'>{client_name}</span>", unsafe_allow_html=True)
             with col_b:
@@ -412,6 +418,29 @@ if page == "📋 Lease Dashboard":
                     st.rerun()
 
             st.markdown("<hr style='margin:8px 0;border-color:#1e2333;'>", unsafe_allow_html=True)
+
+        selected_ids = [l["id"] for l in leases if st.session_state.get(f"sel_{l['id']}")]
+        if selected_ids and can_delete_leases():
+            st.markdown("### 🗑️ Delete selected leases")
+            st.warning(f"{len(selected_ids)} lease(s) selected. This permanently removes them and their extracted fields.")
+            confirm_bulk = st.checkbox("I understand this cannot be undone", key="confirm_bulk_delete")
+            col_del, col_cancel = st.columns(2)
+            with col_del:
+                if st.button("🗑️ Delete selected", type="primary", use_container_width=True, disabled=not confirm_bulk):
+                    from lease_delete import delete_leases
+                    deleted = delete_leases(sb, selected_ids)
+                    for lid in selected_ids:
+                        st.session_state.pop(f"sel_{lid}", None)
+                    st.session_state.pop("confirm_bulk_delete", None)
+                    st.success(f"Deleted {deleted} lease(s).")
+                    st.rerun()
+            with col_cancel:
+                if st.button("Cancel selection", use_container_width=True):
+                    for lid in selected_ids:
+                        st.session_state[f"sel_{lid}"] = False
+                    st.rerun()
+        elif selected_ids:
+            st.info("Only admin users can delete leases.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -469,7 +498,7 @@ elif page == "🔍 Review a Lease":
     </div>
     """, unsafe_allow_html=True)
 
-    col_status, col_approve, col_flag, col_reset = st.columns([3, 1, 1, 1])
+    col_status, col_approve, col_flag, col_reset, col_delete = st.columns([2.4, 1, 1, 1, 1])
     with col_status:
         st.markdown(f"**Current Status:** {get_status_badge(status)}", unsafe_allow_html=True)
     with col_approve:
@@ -487,6 +516,26 @@ elif page == "🔍 Review a Lease":
             update_lease_status(lease_id, "READY FOR REVIEW")
             st.info("Status reset.")
             st.rerun()
+    with col_delete:
+        if can_delete_leases() and st.button("🗑️ Delete", use_container_width=True):
+            st.session_state["pending_single_delete"] = lease_id
+
+    if st.session_state.get("pending_single_delete") == lease_id and can_delete_leases():
+        st.error(f"Permanently delete **{filename}** and all extracted fields? This cannot be undone.")
+        confirm_one = st.checkbox("Yes, delete this lease", key=f"confirm_one_{lease_id}")
+        c_yes, c_no = st.columns(2)
+        with c_yes:
+            if st.button("Confirm delete", type="primary", disabled=not confirm_one):
+                from lease_delete import delete_lease
+                delete_lease(sb, lease_id)
+                st.session_state.pop("pending_single_delete", None)
+                st.session_state.pop("review_lease_id", None)
+                st.success("Lease deleted.")
+                st.rerun()
+        with c_no:
+            if st.button("Keep lease"):
+                st.session_state.pop("pending_single_delete", None)
+                st.rerun()
 
     st.markdown("---")
     
