@@ -11,7 +11,7 @@ class ExtractionTimeoutError(TimeoutError):
 
 
 def run_extraction_with_timeout(pipeline, **kwargs):
-    timeout = int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "300"))
+    timeout = int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "900"))
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(pipeline.process_lease, **kwargs)
         try:
