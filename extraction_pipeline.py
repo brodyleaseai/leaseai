@@ -11,6 +11,34 @@ import PyPDF2
 from openai import OpenAI
 import config
 
+# Scanned PDFs often yield >100 junk characters (page numbers, "l" glyphs,
+# CID font leftovers). Require real words before skipping OCR.
+MIN_EXTRACTABLE_WORDS = 80
+MIN_FOUND_FIELDS = 8
+NOT_FOUND_VALUES = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN"}
+
+
+def is_extractable_text(text: str, min_words: int = MIN_EXTRACTABLE_WORDS) -> bool:
+    """True when the text looks like a readable lease, not OCR-skip junk."""
+    if not text or not text.strip():
+        return False
+    words = re.findall(r"[A-Za-z]{3,}", text)
+    unique = {w.lower() for w in words}
+    return len(words) >= min_words and len(unique) >= max(20, min_words // 4)
+
+
+def count_found_fields(extracted_fields: Dict) -> int:
+    """Count fields that have a real value (not NOT FOUND)."""
+    found = 0
+    for field_data in (extracted_fields or {}).values():
+        if isinstance(field_data, dict):
+            value = str(field_data.get("value", "")).strip()
+        else:
+            value = str(field_data).strip()
+        if value.upper() not in NOT_FOUND_VALUES:
+            found += 1
+    return found
+
 
 class LeaseExtractionPipeline:
     """
@@ -149,41 +177,82 @@ class LeaseExtractionPipeline:
         Returns:
             Tuple of (extracted_text, page_count)
         """
-        try:
-            # Step 1: Try standard text extraction first (fast, works for digital PDFs)
-            text = ""
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                page_count = len(pdf_reader.pages)
-                
-                for page_num in range(page_count):
-                    page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n\n"
-            
-            text = text.strip()
-            
-            # Step 2: Check if meaningful text was extracted
-            # If less than 100 characters extracted, PDF is likely scanned
-            if len(text) < 100:
-                print(f"⚠️  PDF appears to be scanned (extracted only {len(text)} chars)")
-                print(f"   Falling back to OCR extraction...")
-                text, page_count = self._extract_with_ocr(pdf_path)
-                print(f"✓ OCR extraction complete: {len(text)} characters from {page_count} pages")
-            else:
-                print(f"✓ Standard extraction successful: {len(text)} characters from {page_count} pages")
-            
-            return text, page_count
-        
-        except Exception as e:
-            # If PyPDF2 fails completely, try OCR as fallback
-            print(f"⚠️  Standard extraction failed: {str(e)}")
-            print(f"   Attempting OCR extraction...")
+        text = ""
+        page_count = 0
+        last_error = None
+
+        for extractor_name, extractor in (
+            ("pdfplumber", self._extract_with_pdfplumber),
+            ("pymupdf", self._extract_with_pymupdf),
+            ("pypdf2", self._extract_with_pypdf2),
+        ):
             try:
-                text, page_count = self._extract_with_ocr(pdf_path)
-                print(f"✓ OCR extraction successful: {len(text)} characters from {page_count} pages")
+                candidate, page_count = extractor(pdf_path)
+            except Exception as exc:
+                last_error = exc
+                print(f"⚠️  {extractor_name} extraction failed: {exc}")
+                continue
+            text = (candidate or "").strip()
+            print(
+                f"   {extractor_name}: {len(text)} chars, "
+                f"{len(re.findall(r'[A-Za-z]{{3,}}', text))} words, {page_count} pages"
+            )
+            if is_extractable_text(text):
+                print(f"✓ Digital text extraction succeeded via {extractor_name}")
                 return text, page_count
-            except Exception as ocr_error:
-                raise Exception(f"Both standard and OCR extraction failed. Standard error: {str(e)}, OCR error: {str(ocr_error)}")
+
+        print(
+            f"⚠️  Digital text is not usable "
+            f"({len(text)} chars). Running OCR..."
+        )
+        try:
+            text, page_count = self._extract_with_ocr(pdf_path)
+            print(f"✓ OCR extraction complete: {len(text)} characters from {page_count} pages")
+        except Exception as ocr_error:
+            raise Exception(
+                "Could not read lease text. Digital extraction produced unusable text "
+                f"({last_error or 'low word count'}) and OCR failed: {ocr_error}. "
+                "Install Tesseract + Poppler, or configure AWS Textract, then re-upload."
+            ) from ocr_error
+
+        if not is_extractable_text(text):
+            raise Exception(
+                "OCR ran but the lease text is still too thin to abstract. "
+                f"Got {len(text)} characters. Re-scan the PDF as a text (searchable) "
+                "document, or install Tesseract/Poppler / AWS Textract and try again."
+            )
+
+        return text, page_count
+
+    def _extract_with_pypdf2(self, pdf_path: str) -> Tuple[str, int]:
+        text = ""
+        with open(pdf_path, "rb") as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            page_count = len(pdf_reader.pages)
+            for page in pdf_reader.pages:
+                text += (page.extract_text() or "") + "\n\n"
+        return text.strip(), page_count
+
+    def _extract_with_pdfplumber(self, pdf_path: str) -> Tuple[str, int]:
+        import pdfplumber
+
+        text_parts = []
+        with pdfplumber.open(pdf_path) as pdf:
+            page_count = len(pdf.pages)
+            for page in pdf.pages:
+                text_parts.append(page.extract_text() or "")
+        return "\n\n".join(text_parts).strip(), page_count
+
+    def _extract_with_pymupdf(self, pdf_path: str) -> Tuple[str, int]:
+        import fitz
+
+        doc = fitz.open(pdf_path)
+        try:
+            page_count = doc.page_count
+            text = "\n\n".join(page.get_text("text") or "" for page in doc)
+        finally:
+            doc.close()
+        return text.strip(), page_count
     
     def _extract_with_ocr(self, pdf_path: str) -> Tuple[str, int]:
         """
@@ -386,9 +455,9 @@ IMPORTANT INSTRUCTIONS:
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
 
-Context hints:
-{f"Property Address: {property_address}" if property_address else ""}
-{f"Tenant Name: {tenant_name}" if tenant_name else ""}
+Context (do NOT copy these into the JSON unless the same fact appears in the lease text below):
+{f"Uploader-entered property address: {property_address}" if property_address else ""}
+{f"Uploader-entered tenant name: {tenant_name}" if tenant_name else ""}
 
 Lease Document Text ({len(lease_text_to_send):,} characters):
 {lease_text_to_send}
@@ -569,6 +638,12 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"[1/6] Extracting text from PDF: {pdf_path}")
         lease_text, page_count = self.extract_text_from_pdf(pdf_path)
         print(f"✓ Extracted {len(lease_text)} characters from {page_count} pages")
+        if not is_extractable_text(lease_text):
+            raise Exception(
+                "The PDF did not yield readable lease text. "
+                "This is usually a scanned/image PDF. Install Tesseract and Poppler "
+                "(or set AWS Textract keys) and re-upload so OCR can run."
+            )
         
         print(f"[2/6] Scanning for PII...")
         pii_detected = self.detect_pii(lease_text)
@@ -594,7 +669,20 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
         extracted_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
-        print(f"✓ Extracted {len(extracted_fields)} fields")
+        found_count = count_found_fields(extracted_fields)
+        print(f"✓ GPT returned {len(extracted_fields)} field slots, {found_count} with values")
+        if found_count < MIN_FOUND_FIELDS:
+            supabase_client.table("leases").update({
+                "status": "FLAGGED",
+                "extracted_data": extracted_fields,
+            }).eq("id", lease_id).execute()
+            raise Exception(
+                f"Abstraction failed: only {found_count} of {len(self.lease_fields)} "
+                "fields had values. The model did not receive a readable lease body "
+                "(common with scanned PDFs when OCR is skipped). Re-upload after "
+                "installing Tesseract + Poppler or AWS Textract. "
+                "Do not treat this lease as extracted."
+            )
         
         print(f"[5/6] Saving extracted fields to database...")
         field_number = 1
