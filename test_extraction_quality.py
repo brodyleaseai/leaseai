@@ -1,6 +1,6 @@
 """Tests for scanned-PDF text quality and empty-abstract detection."""
 
-from extraction_pipeline import count_found_fields, is_extractable_text
+from extraction_pipeline import count_found_fields, is_extractable_text, word_list
 
 
 def test_junk_page_glyphs_are_not_extractable():
@@ -29,6 +29,10 @@ def test_real_lease_language_is_extractable():
     assert is_extractable_text(text)
 
 
+def test_fullwidth_letters_count_as_words():
+    assert "Lease" in word_list("Ｌｅａｓｅ Agreement")
+
+
 def test_count_found_fields_ignores_not_found():
     fields = {
         "Tenant Legal Name": {"value": "TW Associates LLC", "confidence": "HIGH"},
@@ -44,5 +48,6 @@ if __name__ == "__main__":
     test_junk_page_glyphs_are_not_extractable()
     test_empty_and_short_text_are_not_extractable()
     test_real_lease_language_is_extractable()
+    test_fullwidth_letters_count_as_words()
     test_count_found_fields_ignores_not_found()
     print("test_extraction_quality.py: all tests passed")

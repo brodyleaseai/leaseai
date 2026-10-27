@@ -7,6 +7,7 @@ import re
 import io
 import json
 import base64
+import unicodedata
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 import PyPDF2
@@ -20,11 +21,20 @@ MIN_FOUND_FIELDS = 8
 NOT_FOUND_VALUES = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN"}
 
 
+def normalize_lease_text(text: str) -> str:
+    """Collapse lookalike Unicode so word counts see real letters."""
+    return unicodedata.normalize("NFKC", text or "")
+
+
+def word_list(text: str) -> List[str]:
+    return re.findall(r"[A-Za-z]{3,}", normalize_lease_text(text))
+
+
 def is_extractable_text(text: str, min_words: int = MIN_EXTRACTABLE_WORDS) -> bool:
     """True when the text looks like a readable lease, not OCR-skip junk."""
     if not text or not text.strip():
         return False
-    words = re.findall(r"[A-Za-z]{3,}", text)
+    words = word_list(text)
     unique = {w.lower() for w in words}
     return len(words) >= min_words and len(unique) >= max(20, min_words // 4)
 
@@ -231,11 +241,13 @@ class LeaseExtractionPipeline:
             ) from vision_error
 
         if not is_extractable_text(text):
+            preview = normalize_lease_text(text)[:240].replace("\n", " ")
             raise Exception(
                 "The PDF is image-based and still did not yield a readable lease body "
-                f"({len(text)} characters, "
-                f"{len(re.findall(r'[A-Za-z]{{3,}}', text))} words). "
-                "Re-export it as a searchable PDF and try again."
+                f"({len(text)} characters, {len(word_list(text))} words). "
+                f"Text preview: {preview!r}. "
+                "Confirm the file is the full lease PDF (not a photo of the cover) "
+                "and that your OpenAI key can use gpt-4o vision."
             )
 
         return text, page_count
@@ -270,8 +282,26 @@ class LeaseExtractionPipeline:
             doc.close()
         return text.strip(), page_count
     
-    def _render_pdf_images(self, pdf_path: str, dpi: int = 180):
-        """Render PDF pages to PIL images with PyMuPDF (no Poppler required)."""
+    def _blank_ratio(self, image) -> float:
+        """Share of near-white pixels. 1.0 means a blank page."""
+        sample = image.convert("L").resize((160, 160))
+        pale = sum(1 for px in sample.getdata() if px >= 245)
+        return pale / float(sample.width * sample.height)
+
+    def _prepare_scan_image(self, image):
+        from PIL import ImageEnhance, ImageOps
+
+        prepared = ImageOps.exif_transpose(image.convert("RGB"))
+        if max(prepared.size) > 2200:
+            prepared.thumbnail((2200, 2200))
+        if self._blank_ratio(prepared) > 0.97:
+            inverted = ImageOps.invert(prepared.convert("RGB"))
+            if self._blank_ratio(inverted) < self._blank_ratio(prepared):
+                prepared = inverted
+        return ImageEnhance.Contrast(prepared).enhance(1.8)
+
+    def _render_pdf_images(self, pdf_path: str, dpi: int = 200):
+        """Collect page scans: rendered pages plus embedded images (common for scans)."""
         import fitz
         from PIL import Image
 
@@ -280,14 +310,34 @@ class LeaseExtractionPipeline:
         try:
             zoom = dpi / 72.0
             matrix = fitz.Matrix(zoom, zoom)
-            for page in doc:
+            for page_index, page in enumerate(doc):
+                page_images = []
+                for img in page.get_images(full=True):
+                    xref = img[0]
+                    try:
+                        info = doc.extract_image(xref)
+                        embedded = Image.open(io.BytesIO(info["image"])).convert("RGB")
+                    except Exception:
+                        continue
+                    if embedded.width >= 200 and embedded.height >= 200:
+                        page_images.append(self._prepare_scan_image(embedded))
+
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
-                image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                images.append(image)
+                rendered = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                rendered = self._prepare_scan_image(rendered)
+                if not page_images or self._blank_ratio(rendered) < 0.93:
+                    page_images.insert(0, rendered)
+                if not page_images:
+                    page_images.append(rendered)
+                print(
+                    f"   page {page_index + 1}: {len(page_images)} image(s), "
+                    f"blank_ratio={self._blank_ratio(page_images[0]):.2f}"
+                )
+                images.extend(page_images)
         finally:
             doc.close()
         if not images:
-            raise Exception("PDF has no pages to render")
+            raise Exception("PDF has no pages or embedded images to read")
         return images
 
     def _configure_tesseract(self) -> None:
@@ -362,46 +412,57 @@ class LeaseExtractionPipeline:
             extracted_text += f"\n\n--- Page {page_num} ---\n\n{page_text}"
         return extracted_text.strip()
 
-    def _extract_with_gpt_vision(self, pdf_path: str, batch_size: int = 3) -> Tuple[str, int]:
-        """Transcribe scanned pages with GPT-4o vision. No Tesseract or Poppler needed."""
-        images = self._render_pdf_images(pdf_path, dpi=150)
+    def _extract_with_gpt_vision(self, pdf_path: str, batch_size: int = 1) -> Tuple[str, int]:
+        """Transcribe scanned pages with GPT-4o vision, one image at a time."""
+        images = self._render_pdf_images(pdf_path, dpi=200)
         page_count = len(images)
         transcribed = []
 
-        for start in range(0, page_count, batch_size):
-            batch = images[start:start + batch_size]
-            page_from = start + 1
-            page_to = start + len(batch)
-            print(f"   GPT vision transcribing pages {page_from}-{page_to} of {page_count}...")
-
-            content = [{
-                "type": "text",
-                "text": (
-                    f"Transcribe pages {page_from}-{page_to} of a commercial lease verbatim. "
-                    "Keep every clause, number, date, party name, and heading. "
-                    "Return plain text only."
-                ),
-            }]
-            for image in batch:
-                buffer = io.BytesIO()
-                image.convert("RGB").save(buffer, format="JPEG", quality=70)
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
-                        "detail": "high",
-                    },
-                })
-
+        for index, image in enumerate(images, 1):
+            print(f"   GPT vision transcribing image {index} of {page_count}...")
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG", quality=80)
             response = self.client.chat.completions.create(
                 model="gpt-4o",
-                messages=[{"role": "user", "content": content}],
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"This is image {index} of {page_count} from a commercial lease. "
+                                "Transcribe every visible word verbatim: headings, parties, dates, "
+                                "rent, NNN/CAM, options, and clauses. If the image is blank, say BLANK_PAGE. "
+                                "Return plain text only."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                }],
                 temperature=0,
                 max_tokens=4000,
             )
-            page_text = (response.choices[0].message.content or "").strip()
-            transcribed.append(f"--- Pages {page_from}-{page_to} ---\n{page_text}")
+            message = response.choices[0].message
+            page_text = (message.content or getattr(message, "refusal", None) or "").strip()
+            if not page_text:
+                print(f"   ⚠️  Vision returned empty content for image {index}")
+                continue
+            if page_text.upper() == "BLANK_PAGE":
+                print(f"   ⚠️  Vision says image {index} is blank")
+                continue
+            transcribed.append(f"--- Image {index} ---\n{page_text}")
 
+        if not transcribed:
+            raise Exception(
+                f"GPT-4o vision saw {page_count} image(s) but transcribed no text. "
+                "The PDF pages may be blank, encrypted, or your OpenAI key may not allow vision."
+            )
         return "\n\n".join(transcribed).strip(), page_count
     
     def detect_pii(self, text: str) -> List[str]:
