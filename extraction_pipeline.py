@@ -540,6 +540,7 @@ IMPORTANT INSTRUCTIONS:
 - RULE C: If rent is $ per rentable square foot per year, compute monthly rent as PSF × RSF ÷ 12 and fill Base Rent Year 1-5 plus the full schedule using the stated escalation. Do not leave rent NOT FOUND because the lease printed PSF instead of a monthly dollar figure.
 - RULE D: If Rent Commencement Date is N months after Commencement Date, Free Rent Period is N months.
 - RULE E: Read Basic Lease Provisions and exhibits. Uploader-entered address/tenant names are hints only — never copy them if the lease states different parties or a different building.
+- RULE F: Address fields (Tenant Registered Address, Landlord Contact / Notice Address, Property Civic Address) are street, city, state/ZIP, and Attention only. Stop at the next heading such as "The following Exhibits" or "1. Lease of Premises". Never paste later lease sections into an address field.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}

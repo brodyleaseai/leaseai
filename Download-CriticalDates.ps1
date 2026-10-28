@@ -3,6 +3,7 @@ $base = "https://raw.githubusercontent.com/brodyleaseai/leaseai/cursor/add-criti
 Write-Host "Downloading critical dates files..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Path "pages" -Force | Out-Null
 Invoke-WebRequest -Uri "$base/critical_date_extract.py" -OutFile "critical_date_extract.py"
+Invoke-WebRequest -Uri "$base/lease_field_recovery.py" -OutFile "lease_field_recovery.py"
 Invoke-WebRequest -Uri "$base/lease_report.py" -OutFile "lease_report.py"
 Invoke-WebRequest -Uri "$base/extraction_pipeline.py" -OutFile "extraction_pipeline.py"
 $existing = Get-ChildItem -Path "pages" -Filter "*Critical_Dates.py" -ErrorAction SilentlyContinue | Select-Object -First 1
