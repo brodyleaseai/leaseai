@@ -412,51 +412,52 @@ class LeaseExtractionPipeline:
             extracted_text += f"\n\n--- Page {page_num} ---\n\n{page_text}"
         return extracted_text.strip()
 
-    def _extract_with_gpt_vision(self, pdf_path: str, batch_size: int = 1) -> Tuple[str, int]:
-        """Transcribe scanned pages with GPT-4o vision, one image at a time."""
-        images = self._render_pdf_images(pdf_path, dpi=200)
+    def _extract_with_gpt_vision(self, pdf_path: str, batch_size: int = 3) -> Tuple[str, int]:
+        """Transcribe scanned pages with GPT-4o vision in small batches."""
+        images = self._render_pdf_images(pdf_path, dpi=160)
+        usable = []
+        for index, image in enumerate(images, 1):
+            if self._blank_ratio(image) > 0.98:
+                print(f"   Skipping blank image {index}")
+                continue
+            usable.append((index, image))
         page_count = len(images)
         transcribed = []
 
-        for index, image in enumerate(images, 1):
-            print(f"   GPT vision transcribing image {index} of {page_count}...")
-            buffer = io.BytesIO()
-            image.convert("RGB").save(buffer, format="JPEG", quality=80)
+        for start in range(0, len(usable), batch_size):
+            batch = usable[start:start + batch_size]
+            labels = ", ".join(str(i) for i, _ in batch)
+            print(f"   GPT vision transcribing images {labels} of {page_count}...")
+            content = [{
+                "type": "text",
+                "text": (
+                    f"These are scanned lease images {labels} of {page_count}. "
+                    "Transcribe every visible word verbatim: headings, parties, dates, "
+                    "rent, NNN/CAM, options, and clauses. Label each image. "
+                    "If an image is blank, write BLANK_PAGE for that image. Plain text only."
+                ),
+            }]
+            for _, image in batch:
+                buffer = io.BytesIO()
+                image.convert("RGB").save(buffer, format="JPEG", quality=75)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+                        "detail": "high",
+                    },
+                })
             response = self.client.chat.completions.create(
                 model="gpt-4o",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"This is image {index} of {page_count} from a commercial lease. "
-                                "Transcribe every visible word verbatim: headings, parties, dates, "
-                                "rent, NNN/CAM, options, and clauses. If the image is blank, say BLANK_PAGE. "
-                                "Return plain text only."
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
-                                "detail": "high",
-                            },
-                        },
-                    ],
-                }],
+                messages=[{"role": "user", "content": content}],
                 temperature=0,
                 max_tokens=4000,
             )
             message = response.choices[0].message
             page_text = (message.content or getattr(message, "refusal", None) or "").strip()
-            if not page_text:
-                print(f"   ⚠️  Vision returned empty content for image {index}")
+            if not page_text or page_text.upper() == "BLANK_PAGE":
                 continue
-            if page_text.upper() == "BLANK_PAGE":
-                print(f"   ⚠️  Vision says image {index} is blank")
-                continue
-            transcribed.append(f"--- Image {index} ---\n{page_text}")
+            transcribed.append(f"--- Images {labels} ---\n{page_text}")
 
         if not transcribed:
             raise Exception(
