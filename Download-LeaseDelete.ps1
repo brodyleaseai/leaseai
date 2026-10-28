@@ -6,5 +6,7 @@ Invoke-WebRequest -Uri "$base/lease_delete.py" -OutFile "lease_delete.py"
 Invoke-WebRequest -Uri "$base/Home.py" -OutFile "Home.py"
 Invoke-WebRequest -Uri "$base/pages/16_Delete_Leases.py" -OutFile "pages/16_Delete_Leases.py"
 Write-Host "Done." -ForegroundColor Green
-Write-Host "Restart: streamlit run Home.py --server.enableCORS=true --server.headless=false --server.address=localhost"
+New-Item -ItemType Directory -Force -Path ".streamlit" | Out-Null
+Invoke-WebRequest -Uri "$base/.streamlit/config.toml" -OutFile ".streamlit/config.toml"
+Write-Host "Restart: streamlit run Home.py"
 Write-Host "After login, click Delete Leases or open Delete Leases in the sidebar."
