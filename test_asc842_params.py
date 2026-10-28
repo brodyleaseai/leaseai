@@ -3,6 +3,7 @@ from datetime import date
 from asc842_params import (
     fields_from_rows,
     params_from_extracted_fields,
+    parse_date_value,
     parse_money,
     parse_months,
     parse_percent,
@@ -91,6 +92,33 @@ def test_widget_keys_change_with_lease():
     assert widget_key("lease-a", "monthly") == "asc842_lease-a_monthly"
 
 
+def test_building_1400_conditional_term_becomes_end_date():
+    assert parse_date_value("CONDITIONAL: 84 months from the Commencement Date") is None
+    assert parse_date_value("2020-07-01 (Target; actual Commencement Date is Delivery of the Premises)") == date(2020, 7, 1)
+    params = params_from_extracted_fields({
+        "Lease Commencement Date": {
+            "raw_value": "2020-07-01 (Target; actual Commencement Date is Delivery of the Premises)",
+        },
+        "Lease Expiration Date": {
+            "raw_value": "CONDITIONAL: 84 months from the Commencement Date",
+        },
+        "Lease Term (Total Months)": {"raw_value": "84 months"},
+        "Base Rent Year 1 (monthly)": {"raw_value": "$139,997.00"},
+    })
+    assert params["commencement_date"] == date(2020, 7, 1)
+    assert params["end_date"] == date(2027, 7, 1)
+    assert params["source_end"] is True
+    assert params["monthly_payment"] == 139997.0
+
+
+def test_end_date_formula_without_separate_term_field():
+    params = params_from_extracted_fields({
+        "Lease Commencement Date": {"value": "July 1, 2020"},
+        "Lease Expiration Date": {"value": "ending 84 months from the Commencement Date"},
+    })
+    assert params["end_date"] == date(2027, 7, 1)
+
+
 if __name__ == "__main__":
     test_parse_money_and_percent()
     test_params_follow_extracted_lease()
@@ -98,4 +126,6 @@ if __name__ == "__main__":
     test_fields_from_rows()
     test_reviewed_value_beats_raw_and_skips_not_found()
     test_widget_keys_change_with_lease()
+    test_building_1400_conditional_term_becomes_end_date()
+    test_end_date_formula_without_separate_term_field()
     print("test_asc842_params.py: all tests passed")

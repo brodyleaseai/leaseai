@@ -100,20 +100,50 @@ def parse_percent(value: str, default: float = 0.0) -> float:
     return number
 
 
+def is_duration_formula(value: str) -> bool:
+    """True when the value is a term formula, not a calendar end date."""
+    lower = (value or "").lower()
+    if "conditional" in lower:
+        return True
+    return bool(re.search(r"\d+\s+months?\s+(from|after|following)", lower))
+
+
 def parse_date_value(value: str) -> Optional[date]:
     if not value:
         return None
     text = value.strip()
+    leading = re.match(r"(\d{4}-\d{2}-\d{2})", text)
+    if leading:
+        try:
+            return datetime.strptime(leading.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if is_duration_formula(text):
+        return None
     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%B %d, %Y", "%b %d, %Y", "%Y/%m/%d"):
         try:
             return datetime.strptime(text[:32], fmt).date()
         except ValueError:
             continue
+    if not re.search(
+        r"\d{1,2}/\d{1,2}/\d{2,4}|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b",
+        text,
+        re.I,
+    ):
+        return None
     try:
         from dateutil import parser
         return parser.parse(text, fuzzy=True).date()
     except Exception:
         return None
+
+
+def _add_months(start: date, months: int) -> date:
+    try:
+        from dateutil.relativedelta import relativedelta
+        return start + relativedelta(months=months)
+    except Exception:
+        return start + timedelta(days=int(months * 30.44))
 
 
 def parse_months(value: str, default: int = 0) -> int:
@@ -180,15 +210,16 @@ def source_labels(params: Dict[str, Any]) -> List[str]:
 
 def params_from_extracted_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
     """Return widget defaults for one lease. Missing terms keep safe blanks/zeros."""
-    commence = parse_date_value(_field_value(fields, FIELD_ALIASES["commencement_date"]))
-    end = parse_date_value(_field_value(fields, FIELD_ALIASES["end_date"]))
-    term_months = parse_months(_field_value(fields, FIELD_ALIASES["term_months"]))
-    if commence and not end and term_months:
-        try:
-            from dateutil.relativedelta import relativedelta
-            end = commence + relativedelta(months=term_months)
-        except Exception:
-            end = commence + timedelta(days=int(term_months * 30.44))
+    commence_text = _field_value(fields, FIELD_ALIASES["commencement_date"])
+    end_text = _field_value(fields, FIELD_ALIASES["end_date"])
+    term_text = _field_value(fields, FIELD_ALIASES["term_months"])
+    commence = parse_date_value(commence_text)
+    end = parse_date_value(end_text)
+    term_months = parse_months(term_text)
+    if not term_months and is_duration_formula(end_text):
+        term_months = parse_months(end_text)
+    if commence and term_months and (not end or is_duration_formula(end_text)):
+        end = _add_months(commence, term_months)
     if commence and end and not term_months:
         term_months = max(1, (end.year - commence.year) * 12 + (end.month - commence.month))
 
