@@ -17,6 +17,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
 from lease_field_recovery import extracted_display_value
+from critical_date_extract import critical_dates_from_fields
 
 # A single ReportLab table row cannot be taller than the page frame (~654pt).
 MAX_VALUE_CHARS = 1400
@@ -348,8 +349,50 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     story.append(summary_table)
     story.append(PageBreak())
+
+    critical_dates = critical_dates_from_fields(extracted_fields)
+    story.append(Paragraph("Critical Dates", heading_style))
+    story.append(Spacer(1, 0.12 * inch))
+    date_header_style = ParagraphStyle(
+        "CriticalDateHeader",
+        parent=styles["Normal"],
+        fontSize=9,
+        fontName="Helvetica-Bold",
+        textColor=colors.whitesmoke,
+        alignment=TA_CENTER,
+    )
+    date_cell_style = ParagraphStyle(
+        "CriticalDateCell",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=11,
+        alignment=TA_LEFT,
+    )
+    date_rows = [[
+        Paragraph("Date Type", date_header_style),
+        Paragraph("Date", date_header_style),
+        Paragraph("Source / Notes", date_header_style),
+    ]]
+    if critical_dates:
+        for item in critical_dates:
+            date_rows.append([
+                Paragraph(_xml(item["date_type"]), date_cell_style),
+                Paragraph(_xml(item["date_value"]), date_cell_style),
+                Paragraph(_xml(item.get("description") or item.get("source_field") or ""), date_cell_style),
+            ])
+    else:
+        date_rows.append([
+            Paragraph("None resolved", date_cell_style),
+            Paragraph("—", date_cell_style),
+            Paragraph("No calendar commencement, expiration, rent start, or notice deadline was found in the extracted fields.", date_cell_style),
+        ])
+    dates_table = Table(date_rows, colWidths=[2.1 * inch, 1.4 * inch, 3.4 * inch], repeatRows=1, splitByRow=1)
+    _style_fields_table(dates_table, len(date_rows))
+    story.append(dates_table)
+    story.append(Spacer(1, 0.25 * inch))
+    story.append(PageBreak())
     
-    # Extracted Fields Section (now on page 2)
+    # Extracted Fields Section
     story.append(Paragraph("Extracted Lease Data", heading_style))
     story.append(Spacer(1, 0.25 * inch))
     
