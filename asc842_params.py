@@ -49,18 +49,25 @@ FIELD_ALIASES = {
 }
 
 
+def _usable_text(value: Any) -> str:
+    text = str(value).strip() if value is not None else ""
+    return text if text.upper() not in NOT_FOUND else ""
+
+
 def _field_value(fields: Dict[str, Any], names: Iterable[str]) -> str:
     for name in names:
         raw = fields.get(name)
         if raw is None:
             continue
         if isinstance(raw, dict):
-            value = raw.get("reviewed_value") or raw.get("raw_value") or raw.get("value") or ""
+            for key in ("reviewed_value", "raw_value", "value"):
+                text = _usable_text(raw.get(key))
+                if text:
+                    return text
         else:
-            value = raw
-        text = str(value).strip()
-        if text.upper() not in NOT_FOUND:
-            return text
+            text = _usable_text(raw)
+            if text:
+                return text
     return ""
 
 
