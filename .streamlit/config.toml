@@ -1,7 +1,8 @@
 [server]
-headless = true
+headless = false
 port = 8501
-enableCORS = false
+address = "localhost"
+enableCORS = true
 enableXsrfProtection = true
 maxUploadSize = 50
 
