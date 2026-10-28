@@ -15,6 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
+from lease_field_recovery import extracted_display_value
 
 
 def _make_colored_box(box_color: str):
@@ -154,8 +155,8 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     # Property Information Box
     property_info = [
-        ["Property:", lease_data.get("property_address", "N/A")],
-        ["Tenant:", lease_data.get("tenant_name", "N/A")],
+        ["Property:", extracted_display_value(extracted_fields, "Property Civic Address") or lease_data.get("property_address", "N/A")],
+        ["Tenant:", extracted_display_value(extracted_fields, "Tenant Legal Name") or lease_data.get("tenant_name", "N/A")],
         ["Generated:", datetime.now().strftime("%B %d, %Y at %I:%M %p")],
     ]
     

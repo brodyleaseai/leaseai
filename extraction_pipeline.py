@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+from lease_field_recovery import merge_extracted_fields, recover_lease_fields
 
 # Scanned PDFs often yield >100 junk characters (page numbers, "l" glyphs,
 # CID font leftovers). Require real words before skipping OCR.
@@ -527,13 +528,18 @@ For each field, provide:
 
 IMPORTANT INSTRUCTIONS:
 - If a field is genuinely not mentioned in the lease, mark it as "NOT FOUND" with LOW confidence
-- Use exact dates in YYYY-MM-DD format
+- Use exact dates in YYYY-MM-DD format when a calendar date is stated
 - Include units for all measurements (sq ft, months, %, $, etc.)
 - For rent schedules, show the exact monthly amount and ALL rent periods/years if escalating
 - For responsibilities, specify "Landlord", "Tenant", or "Shared"
 - Extract COMPLETE clauses - do not truncate mid-sentence
 - Be thorough but precise - don't invent information
 - For long clauses, capture the FULL text in the value field
+- RULE A: If a clause exists but the dollar/date is blank or redacted ([***], TBD, __), write "BLANK — clause present but value not entered". That is not NOT FOUND.
+- RULE B: Do not write NOT FOUND for conditional dates. If commencement is Delivery, or expiration is N months from commencement, write CONDITIONAL: [the formula] and include any Target Commencement Date.
+- RULE C: If rent is $ per rentable square foot per year, compute monthly rent as PSF × RSF ÷ 12 and fill Base Rent Year 1-5 plus the full schedule using the stated escalation. Do not leave rent NOT FOUND because the lease printed PSF instead of a monthly dollar figure.
+- RULE D: If Rent Commencement Date is N months after Commencement Date, Free Rent Period is N months.
+- RULE E: Read Basic Lease Provisions and exhibits. Uploader-entered address/tenant names are hints only — never copy them if the lease states different parties or a different building.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
@@ -583,13 +589,17 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 response_text = response_text[json_start:json_end].strip()
             
             extracted_fields = json.loads(response_text)
-            
             return extracted_fields
         
         except json.JSONDecodeError as e:
             raise Exception(f"Failed to parse GPT-4 response as JSON: {str(e)}")
         except Exception as e:
             raise Exception(f"GPT-4 extraction failed: {str(e)}")
+
+    def complete_extracted_fields(self, lease_text: str, model_fields: Dict = None) -> Dict:
+        """Fill required slots with recovered Basic Lease Provisions when the model misses them."""
+        recovered = recover_lease_fields(lease_text)
+        return merge_extracted_fields(self.lease_fields, model_fields or {}, recovered)
     
     def calculate_confidence_score(self, confidence_str: str) -> float:
         """
@@ -751,7 +761,12 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Lease created with ID: {lease_id}")
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
-        extracted_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+        try:
+            model_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+        except Exception as gpt_error:
+            print(f"⚠ GPT extraction failed ({gpt_error}); recovering required terms from the lease text")
+            model_fields = {}
+        extracted_fields = self.complete_extracted_fields(lease_text, model_fields)
         found_count = count_found_fields(extracted_fields)
         print(f"✓ GPT returned {len(extracted_fields)} field slots, {found_count} with values")
         if found_count < MIN_FOUND_FIELDS:
@@ -766,6 +781,15 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 "installing Tesseract + Poppler or AWS Textract. "
                 "Do not treat this lease as extracted."
             )
+        
+        recovered_address = ""
+        recovered_tenant = ""
+        address_field = extracted_fields.get("Property Civic Address") or {}
+        tenant_field = extracted_fields.get("Tenant Legal Name") or {}
+        if isinstance(address_field, dict):
+            recovered_address = str(address_field.get("value") or "").strip()
+        if isinstance(tenant_field, dict):
+            recovered_tenant = str(tenant_field.get("value") or "").strip()
         
         print(f"[5/6] Saving extracted fields to database...")
         field_number = 1
@@ -801,10 +825,15 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Saved {field_number - 1} fields")
         
         print(f"[6/7] Updating lease status to READY FOR REVIEW...")
-        supabase_client.table("leases").update({
+        lease_update = {
             "status": "READY FOR REVIEW",
             "extracted_data": extracted_fields,
-        }).eq("id", lease_id).execute()
+        }
+        if recovered_address and recovered_address.upper() not in NOT_FOUND_VALUES:
+            lease_update["property_address"] = recovered_address
+        if recovered_tenant and recovered_tenant.upper() not in NOT_FOUND_VALUES:
+            lease_update["tenant_name"] = recovered_tenant
+        supabase_client.table("leases").update(lease_update).eq("id", lease_id).execute()
         print(f"✓ Lease status updated")
         
         print(f"[7/8] Extracting and adding critical dates...")
