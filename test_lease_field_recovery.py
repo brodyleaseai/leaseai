@@ -1,4 +1,6 @@
 from lease_field_recovery import (
+    clip_postal_address,
+    extract_labeled_address,
     merge_extracted_fields,
     parse_basic_provisions,
     recover_lease_fields,
@@ -35,6 +37,8 @@ Permitted Use: Research and development laboratory, related office and other rel
 character of the Project
 Landlord's Notice Address: 26 North Euclid Avenue Pasadena, CA 91101
 Tenant's Notice Address: One Kendall Square, Building 1400 Suite 14-201 Cambridge, MA 02139
+Attention: Lease Administrator
+The following Exhibits and Addenda are attached hereto and incorporated herein by this reference:
 The “Commencement Date” shall be the date Landlord Delivers the Premises to Tenant. The “Rent Commencement Date”
 shall be the date that is 5 months after the Commencement Date.
 This Lease and Tenant’s interest and rights hereunder are hereby made and shall be subject and
@@ -90,8 +94,11 @@ def test_recover_are_terms_that_the_report_missed():
     assert "Cambridge" in recovered["Property Civic Address"]["value"]
     tenant_addr = recovered.get("Tenant Registered Address", {}).get("value", "")
     assert "Cambridge" in tenant_addr
+    assert "14-201" in tenant_addr
+    assert "Lease Administrator" in tenant_addr
     assert "Commencement Date" not in tenant_addr
     assert "pipes" not in tenant_addr.lower()
+    assert "EXHIBIT" not in tenant_addr
     assert len(tenant_addr) < 160
     assert recovered["Base Rent Year 1 (monthly)"]["value"] == "$139,997.00"
     assert recovered["Base Rent Year 2 (monthly)"]["value"] == "$144,196.91"
@@ -132,6 +139,41 @@ def test_merge_overwrites_not_found_model_values():
     assert merged["Building Class"]["value"] == "NOT FOUND"
 
 
+def test_clip_stops_after_attention_and_drops_lease_body():
+    blob = (
+        "Tenant's Notice Address:\n"
+        "One Kendall Square, Building 1400\n"
+        "Suite 14-201\n"
+        "Cambridge, MA 02139\n"
+        "Attention: Lease Administrator\n"
+        "The following Exhibits and Addenda are attached hereto\n"
+        "1. Lease of Premises. Landlord hereby leases the Premises "
+        "and pipes, ducts, conduits, wires and appurtenant fixtures " * 40
+    )
+    clipped = clip_postal_address(blob)
+    assert clipped.startswith("One Kendall Square")
+    assert "Lease Administrator" in clipped
+    assert "pipes" not in clipped.lower()
+    assert "EXHIBIT" not in clipped.upper()
+    assert len(clipped) < 160
+
+
+def test_merge_replaces_overflowing_gpt_tenant_address():
+    pipeline = LeaseExtractionPipeline.__new__(LeaseExtractionPipeline)
+    pipeline.lease_fields = ["Tenant Registered Address", "Property Civic Address"]
+    overflow = (
+        "One Kendall Square, Building 1400 Suite 14-201 Cambridge, MA 02139 "
+        "Attention: Lease Administrator The following Exhibits " + ("pipes, ducts " * 200)
+    )
+    merged = pipeline.complete_extracted_fields(ARE_EXCERPT, {
+        "Tenant Registered Address": {"value": overflow, "confidence": "HIGH"},
+    })
+    value = merged["Tenant Registered Address"]["value"]
+    assert "14-201" in value
+    assert "pipes" not in value.lower()
+    assert len(value) < 160
+
+
 def test_full_are_pdf_recovers_same_economics():
     from pathlib import Path
 
@@ -152,11 +194,19 @@ def test_full_are_pdf_recovers_same_economics():
     assert recovered["Free Rent Period (months)"]["value"] == "5 months"
     assert "Cambridge" in recovered["Property Civic Address"]["value"]
     assert recovered["Tenant Legal Name"]["value"].startswith("CAMP4")
+    tenant_addr = recovered["Tenant Registered Address"]["value"]
+    assert extract_labeled_address("\n".join(pages), "Tenant's Notice Address")
+    assert "14-201" in tenant_addr
+    assert "Lease Administrator" in tenant_addr
+    assert "pipes" not in tenant_addr.lower()
+    assert len(tenant_addr) < 160
 
 
 if __name__ == "__main__":
     test_basic_provisions_parse_are_labels()
     test_recover_are_terms_that_the_report_missed()
     test_merge_overwrites_not_found_model_values()
+    test_clip_stops_after_attention_and_drops_lease_body()
+    test_merge_replaces_overflowing_gpt_tenant_address()
     test_full_are_pdf_recovers_same_economics()
     print("test_lease_field_recovery.py: all tests passed")

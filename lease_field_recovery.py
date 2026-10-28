@@ -113,6 +113,74 @@ def _parse_date(text: str) -> Optional[str]:
     return None
 
 
+ADDRESS_FIELDS = {
+    "Tenant Registered Address",
+    "Landlord Contact / Notice Address",
+    "Landlord Registered Address",
+    "Property Civic Address",
+}
+
+ADDRESS_STOPPERS = (
+    r"The following Exhibits",
+    r"1\.\s+Lease of Premises",
+    r"BASIC LEASE PROVISIONS",
+    r"pipes,?\s+ducts",
+    r"Common Areas",
+    r"IN WITNESS WHEREOF",
+    r"From and after the Commencement Date",
+    r"Upon and subject to all of the terms",
+)
+
+
+def clip_postal_address(value: str) -> str:
+    """Keep street, city, ZIP, and Attention — drop any lease body that followed."""
+    if not value:
+        return ""
+    text = re.sub(r"\s+", " ", value).strip()
+    text = re.sub(r"^(?:Tenant'?s?|Landlord'?s?)\s+Notice Address:\s*", "", text, flags=re.I)
+    for pattern in ADDRESS_STOPPERS:
+        text = re.split(pattern, text, maxsplit=1, flags=re.I)[0].strip(" .;:")
+    attn = re.search(r"(.+?\bAttention:\s+[^.]{2,60})", text, re.I)
+    if attn:
+        return attn.group(1).strip(" .;")
+    zip_match = re.search(
+        r"(.{8,180}?\b(?:[A-Z]{2}\s+\d{5}(?:-\d{4})?|[A-Z]{2}\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d))",
+        text,
+    )
+    if zip_match:
+        clipped = zip_match.group(1).strip(" .;")
+        if len(text) > len(clipped) + 40:
+            return clipped
+    if len(text) > 180:
+        return text[:180].rsplit(" ", 1)[0].strip(" .;")
+    return text
+
+
+def extract_labeled_address(text: str, *labels: str) -> str:
+    """Read a notice/address label and stop at the next heading."""
+    window = (text[:25000] or "").replace("\u2019", "'").replace("\u2018", "'")
+    next_heads = (
+        "The following Exhibits",
+        "Tenant's Notice Address",
+        "Landlord's Notice Address",
+        "Address for Rent Payment",
+        "1. Lease of Premises",
+        "Permitted Use",
+    )
+    for label in labels:
+        lookahead = "|".join(re.escape(item) for item in next_heads if item.lower() != label.lower())
+        match = re.search(
+            rf"{re.escape(label)}\s*:\s*(.+?)(?=(?:{lookahead})\s*:|\n1\.\s+)",
+            window,
+            re.I | re.S,
+        )
+        if match:
+            clipped = clip_postal_address(match.group(1))
+            if clipped:
+                return clipped
+    return ""
+
+
 def parse_basic_provisions(text: str) -> Dict[str, str]:
     """Pull labeled Basic Lease Provisions from the front of the lease."""
     window = (text[:20000] or "").replace("\u2019", "'").replace("\u2018", "'")
@@ -150,7 +218,9 @@ def parse_basic_provisions(text: str) -> Dict[str, str]:
         value_end = chosen[index + 1][0] if index + 1 < len(chosen) else len(block)
         value = re.sub(r"\s+", " ", block[end:value_end]).strip(" .;")
         value = re.split(r'\s+The\s+[“"”]', value, maxsplit=1)[0].strip(" .;")
-        if len(value) > 280:
+        if "address" in label.lower() or "notice" in label.lower():
+            value = clip_postal_address(value)
+        elif len(value) > 280:
             value = value[:280].rsplit(" ", 1)[0].strip(" .;")
         if value:
             found[label] = value
@@ -284,12 +354,22 @@ def recover_lease_fields(lease_text: str) -> Dict[str, Dict[str, str]]:
     if building:
         recovered["Property Civic Address"] = _field(building, "HIGH", building)
 
-    notice = basic.get("Landlord's Notice Address") or ""
+    notice = extract_labeled_address(text, "Landlord's Notice Address") or clip_postal_address(basic.get("Landlord's Notice Address", ""))
     if notice:
-        recovered["Landlord Contact / Notice Address"] = _field(notice, "HIGH", notice)
-    tenant_notice = basic.get("Tenant's Notice Address") or ""
+        recovered["Landlord Contact / Notice Address"] = _field(
+            notice,
+            "HIGH",
+            notice,
+            "Landlord notice address from Basic Lease Provisions",
+        )
+    tenant_notice = extract_labeled_address(text, "Tenant's Notice Address") or clip_postal_address(basic.get("Tenant's Notice Address", ""))
     if tenant_notice:
-        recovered["Tenant Registered Address"] = _field(tenant_notice, "HIGH", tenant_notice)
+        recovered["Tenant Registered Address"] = _field(
+            tenant_notice,
+            "HIGH",
+            tenant_notice,
+            "Tenant notice address; stopped at Attention / next heading",
+        )
 
     premises_rsf = _rsf(basic.get("Rentable Area of Premises", "") or basic.get("Premises", ""))
     if premises_rsf:
@@ -512,23 +592,36 @@ def merge_extracted_fields(
             model = {"value": model, "confidence": "LOW", "source_snippet": "", "notes": ""} if model else {}
         model_value = _usable(model.get("value"))
         recovered = recovered_fields.get(name)
-        if recovered and (not model_value or recovered.get("prefer")):
-            merged[name] = {k: v for k, v in recovered.items() if k != "prefer"}
+        if recovered and (not model_value or recovered.get("prefer") or _address_overflow(name, model_value)):
+            chosen = {k: v for k, v in recovered.items() if k != "prefer"}
         elif model_value:
-            merged[name] = {
+            chosen = {
                 "value": model_value,
                 "confidence": model.get("confidence") or "MEDIUM",
                 "source_snippet": model.get("source_snippet") or model.get("source_text") or "",
                 "notes": model.get("notes") or "",
             }
         else:
-            merged[name] = {
+            chosen = {
                 "value": "NOT FOUND",
                 "confidence": "LOW",
                 "source_snippet": "",
                 "notes": "No clause found referencing this field",
             }
+        if name in ADDRESS_FIELDS and chosen.get("value") and chosen["value"] != "NOT FOUND":
+            clipped = clip_postal_address(str(chosen["value"]))
+            if clipped:
+                chosen["value"] = clipped
+        merged[name] = chosen
     return merged
+
+
+def _address_overflow(field_name: str, value: str) -> bool:
+    if field_name not in ADDRESS_FIELDS or not value:
+        return False
+    if len(value) > 220:
+        return True
+    return bool(re.search(r"The following Exhibits|pipes,?\s+ducts|1\.\s+Lease of Premises", value, re.I))
 
 
 def extracted_display_value(fields: Dict[str, Any], *names: str) -> str:

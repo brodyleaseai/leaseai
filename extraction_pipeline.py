@@ -540,6 +540,7 @@ IMPORTANT INSTRUCTIONS:
 - RULE C: If rent is $ per rentable square foot per year, compute monthly rent as PSF × RSF ÷ 12 and fill Base Rent Year 1-5 plus the full schedule using the stated escalation. Do not leave rent NOT FOUND because the lease printed PSF instead of a monthly dollar figure.
 - RULE D: If Rent Commencement Date is N months after Commencement Date, Free Rent Period is N months.
 - RULE E: Read Basic Lease Provisions and exhibits. Uploader-entered address/tenant names are hints only — never copy them if the lease states different parties or a different building.
+- RULE F: Address fields (Tenant Registered Address, Landlord Contact / Notice Address, Property Civic Address) are street, city, state/ZIP, and Attention only. Stop at the next heading such as "The following Exhibits" or "1. Lease of Premises". Never paste later lease sections into an address field.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
@@ -629,76 +630,18 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             extracted_fields: Dictionary of extracted lease fields
             supabase_client: Supabase client instance
         """
-        from datetime import datetime
-        
-        # Mapping of field names to critical date types
-        critical_date_mappings = {
-            "Lease Expiration Date": "Lease Expiration",
-            "Renewal Notice Deadline": "Renewal Notice Deadline",
-            "Termination Notice Deadline": "Termination Notice Deadline",
-            "Early Termination Right": "Termination Option Deadline",
-        }
-        
+        from critical_date_extract import critical_dates_from_fields, records_for_database
+
+        dates = critical_dates_from_fields(extracted_fields)
         dates_added = 0
-        
-        for field_name, date_type in critical_date_mappings.items():
-            if field_name not in extracted_fields:
-                continue
-            
-            field_data = extracted_fields[field_name]
-            
-            # Get the value
-            if isinstance(field_data, dict):
-                value = field_data.get("value", "NOT FOUND")
-                confidence = field_data.get("confidence", "LOW")
-                notes = field_data.get("notes", "")
-            else:
-                value = str(field_data)
-                confidence = "LOW"
-                notes = ""
-            
-            # Skip if not found or low confidence
-            if value == "NOT FOUND" or confidence == "LOW":
-                continue
-            
-            # Try to parse the date
+        for record in records_for_database(lease_id, dates):
             try:
-                # Try different date formats
-                date_value = None
-                for date_format in ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y"]:
-                    try:
-                        date_value = datetime.strptime(value.split()[0] if " " in value else value, date_format).date()
-                        break
-                    except:
-                        continue
-                
-                if not date_value:
-                    # Try parsing with dateutil if available
-                    try:
-                        from dateutil import parser
-                        date_value = parser.parse(value).date()
-                    except:
-                        continue
-                
-                # Add to critical_dates table
-                date_record = {
-                    "lease_id": lease_id,
-                    "date_type": date_type,
-                    "date_value": date_value.isoformat(),
-                    "description": f"Auto-extracted from lease: {notes}" if notes else f"Auto-extracted from {field_name}",
-                    "notification_intervals": [90, 60, 30, 14, 7, 1],
-                    "notifications_sent": [],
-                    "is_active": True
-                }
-                
-                supabase_client.table("critical_dates").insert(date_record).execute()
+                supabase_client.table("critical_dates").insert(record).execute()
                 dates_added += 1
-                print(f"  ✓ Added {date_type}: {date_value.isoformat()}")
-                
+                print(f"  ✓ Added {record['date_type']}: {record['date_value']}")
             except Exception as e:
-                print(f"  ⚠ Could not parse date for {field_name}: {value} ({e})")
-                continue
-        
+                print(f"  ⚠ Could not save {record['date_type']}: {e}")
+
         if dates_added == 0:
             print(f"  ℹ️ No critical dates found in extracted fields")
         else:
