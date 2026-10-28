@@ -4,12 +4,52 @@ Complete PDF → AI Extraction → Database workflow
 """
 import os
 import re
+import io
 import json
+import base64
+import unicodedata
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+
+# Scanned PDFs often yield >100 junk characters (page numbers, "l" glyphs,
+# CID font leftovers). Require real words before skipping OCR.
+MIN_EXTRACTABLE_WORDS = 80
+MIN_FOUND_FIELDS = 8
+NOT_FOUND_VALUES = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN"}
+
+
+def normalize_lease_text(text: str) -> str:
+    """Collapse lookalike Unicode so word counts see real letters."""
+    return unicodedata.normalize("NFKC", text or "")
+
+
+def word_list(text: str) -> List[str]:
+    return re.findall(r"[A-Za-z]{3,}", normalize_lease_text(text))
+
+
+def is_extractable_text(text: str, min_words: int = MIN_EXTRACTABLE_WORDS) -> bool:
+    """True when the text looks like a readable lease, not OCR-skip junk."""
+    if not text or not text.strip():
+        return False
+    words = word_list(text)
+    unique = {w.lower() for w in words}
+    return len(words) >= min_words and len(unique) >= max(20, min_words // 4)
+
+
+def count_found_fields(extracted_fields: Dict) -> int:
+    """Count fields that have a real value (not NOT FOUND)."""
+    found = 0
+    for field_data in (extracted_fields or {}).values():
+        if isinstance(field_data, dict):
+            value = str(field_data.get("value", "")).strip()
+        else:
+            value = str(field_data).strip()
+        if value.upper() not in NOT_FOUND_VALUES:
+            found += 1
+    return found
 
 
 class LeaseExtractionPipeline:
@@ -149,170 +189,282 @@ class LeaseExtractionPipeline:
         Returns:
             Tuple of (extracted_text, page_count)
         """
-        try:
-            # Step 1: Try standard text extraction first (fast, works for digital PDFs)
-            text = ""
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                page_count = len(pdf_reader.pages)
-                
-                for page_num in range(page_count):
-                    page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n\n"
-            
-            text = text.strip()
-            
-            # Step 2: Check if meaningful text was extracted
-            # If less than 100 characters extracted, PDF is likely scanned
-            if len(text) < 100:
-                print(f"⚠️  PDF appears to be scanned (extracted only {len(text)} chars)")
-                print(f"   Falling back to OCR extraction...")
-                text, page_count = self._extract_with_ocr(pdf_path)
-                print(f"✓ OCR extraction complete: {len(text)} characters from {page_count} pages")
-            else:
-                print(f"✓ Standard extraction successful: {len(text)} characters from {page_count} pages")
-            
-            return text, page_count
-        
-        except Exception as e:
-            # If PyPDF2 fails completely, try OCR as fallback
-            print(f"⚠️  Standard extraction failed: {str(e)}")
-            print(f"   Attempting OCR extraction...")
+        text = ""
+        page_count = 0
+        last_error = None
+
+        for extractor_name, extractor in (
+            ("pdfplumber", self._extract_with_pdfplumber),
+            ("pymupdf", self._extract_with_pymupdf),
+            ("pypdf2", self._extract_with_pypdf2),
+        ):
             try:
-                text, page_count = self._extract_with_ocr(pdf_path)
-                print(f"✓ OCR extraction successful: {len(text)} characters from {page_count} pages")
-                return text, page_count
-            except Exception as ocr_error:
-                raise Exception(f"Both standard and OCR extraction failed. Standard error: {str(e)}, OCR error: {str(ocr_error)}")
-    
-    def _extract_with_ocr(self, pdf_path: str) -> Tuple[str, int]:
-        """
-        Extract text from PDF using AWS Textract OCR.
-        Falls back to local Tesseract if AWS is not configured.
-        
-        Args:
-            pdf_path: Path to PDF file
-            
-        Returns:
-            Tuple of (extracted_text, page_count)
-        """
-        # Try AWS Textract first (higher quality, cloud-based)
-        try:
-            return self._extract_with_textract(pdf_path)
-        except Exception as textract_error:
-            print(f"⚠️  AWS Textract not available: {textract_error}")
-            print(f"   Falling back to local Tesseract OCR...")
-            return self._extract_with_tesseract(pdf_path)
-    
-    def _extract_with_textract(self, pdf_path: str) -> Tuple[str, int]:
-        """
-        Extract text using AWS Textract (cloud OCR service).
-        
-        Cost: ~$1.50 per 1,000 pages (~$0.075 for a 50-page lease)
-        
-        Args:
-            pdf_path: Path to PDF file
-            
-        Returns:
-            Tuple of (extracted_text, page_count)
-        """
-        try:
-            import boto3
-            from pdf2image import convert_from_path
-            import io
-        except ImportError:
-            raise Exception("AWS Textract requires: pip install boto3 pdf2image pillow")
-        
-        # Initialize AWS Textract client
-        try:
-            textract = boto3.client(
-                'textract',
-                region_name=config.AWS_REGION if hasattr(config, 'AWS_REGION') else 'us-east-1',
-                aws_access_key_id=config.AWS_ACCESS_KEY_ID if hasattr(config, 'AWS_ACCESS_KEY_ID') else None,
-                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY if hasattr(config, 'AWS_SECRET_ACCESS_KEY') else None
+                candidate, page_count = extractor(pdf_path)
+            except Exception as exc:
+                last_error = exc
+                print(f"⚠️  {extractor_name} extraction failed: {exc}")
+                continue
+            text = (candidate or "").strip()
+            print(
+                f"   {extractor_name}: {len(text)} chars, "
+                f"{len(re.findall(r'[A-Za-z]{{3,}}', text))} words, {page_count} pages"
             )
-        except Exception as e:
-            raise Exception(f"Failed to initialize AWS Textract client. Configure AWS credentials in config.py: {e}")
-        
-        # Convert PDF to images (Textract requires image format)
+            if is_extractable_text(text):
+                print(f"✓ Digital text extraction succeeded via {extractor_name}")
+                return text, page_count
+
+        print(
+            f"⚠️  Digital text is not usable "
+            f"({len(text)} chars). Running OCR..."
+        )
+        ocr_error = None
         try:
-            images = convert_from_path(pdf_path, dpi=300)
-            page_count = len(images)
-        except Exception as e:
-            raise Exception(f"Failed to convert PDF to images: {e}")
-        
-        # Extract text from each page using Textract
-        extracted_text = ""
-        
-        for page_num, image in enumerate(images, 1):
-            print(f"   OCR processing page {page_num}/{page_count}...")
-            
-            # Convert image to bytes
-            img_byte_array = io.BytesIO()
-            image.save(img_byte_array, format='PNG')
-            img_bytes = img_byte_array.getvalue()
-            
-            # Call Textract API
-            try:
-                response = textract.detect_document_text(
-                    Document={'Bytes': img_bytes}
-                )
-                
-                # Extract text from response
-                page_text = ""
-                for item in response.get('Blocks', []):
-                    if item['BlockType'] == 'LINE':
-                        page_text += item['Text'] + "\n"
-                
-                extracted_text += f"\n\n--- Page {page_num} ---\n\n" + page_text
-                
-            except Exception as e:
-                print(f"   ⚠️  Textract failed on page {page_num}: {e}")
-                # Continue with other pages
-                extracted_text += f"\n\n--- Page {page_num} (OCR failed) ---\n\n"
-        
-        return extracted_text.strip(), page_count
+            text, page_count = self._extract_with_ocr(pdf_path)
+            print(f"✓ OCR extraction complete: {len(text)} characters from {page_count} pages")
+        except Exception as exc:
+            ocr_error = exc
+            print(f"⚠️  Classic OCR failed: {exc}")
+
+        if is_extractable_text(text):
+            return text, page_count
+
+        print("⚠️  OCR text is still too thin. Transcribing pages with GPT-4o vision...")
+        try:
+            text, page_count = self._extract_with_gpt_vision(pdf_path)
+            print(f"✓ Vision transcription complete: {len(text)} characters from {page_count} pages")
+        except Exception as vision_error:
+            raise Exception(
+                "Could not read the lease. Digital text was unusable, OCR produced "
+                f"{len(text)} characters"
+                f"{f' ({ocr_error})' if ocr_error else ''}, "
+                f"and GPT vision failed: {vision_error}."
+            ) from vision_error
+
+        if not is_extractable_text(text):
+            preview = normalize_lease_text(text)[:240].replace("\n", " ")
+            raise Exception(
+                "The PDF is image-based and still did not yield a readable lease body "
+                f"({len(text)} characters, {len(word_list(text))} words). "
+                f"Text preview: {preview!r}. "
+                "Confirm the file is the full lease PDF (not a photo of the cover) "
+                "and that your OpenAI key can use gpt-4o vision."
+            )
+
+        return text, page_count
+
+    def _extract_with_pypdf2(self, pdf_path: str) -> Tuple[str, int]:
+        text = ""
+        with open(pdf_path, "rb") as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            page_count = len(pdf_reader.pages)
+            for page in pdf_reader.pages:
+                text += (page.extract_text() or "") + "\n\n"
+        return text.strip(), page_count
+
+    def _extract_with_pdfplumber(self, pdf_path: str) -> Tuple[str, int]:
+        import pdfplumber
+
+        text_parts = []
+        with pdfplumber.open(pdf_path) as pdf:
+            page_count = len(pdf.pages)
+            for page in pdf.pages:
+                text_parts.append(page.extract_text() or "")
+        return "\n\n".join(text_parts).strip(), page_count
+
+    def _extract_with_pymupdf(self, pdf_path: str) -> Tuple[str, int]:
+        import fitz
+
+        doc = fitz.open(pdf_path)
+        try:
+            page_count = doc.page_count
+            text = "\n\n".join(page.get_text("text") or "" for page in doc)
+        finally:
+            doc.close()
+        return text.strip(), page_count
     
-    def _extract_with_tesseract(self, pdf_path: str) -> Tuple[str, int]:
-        """
-        Extract text using local Tesseract OCR (fallback option).
-        
-        Requires: sudo apt-get install tesseract-ocr (Linux) or brew install tesseract (Mac)
-        
-        Args:
-            pdf_path: Path to PDF file
-            
-        Returns:
-            Tuple of (extracted_text, page_count)
-        """
+    def _blank_ratio(self, image) -> float:
+        """Share of near-white pixels. 1.0 means a blank page."""
+        sample = image.convert("L").resize((160, 160))
+        pale = sum(1 for px in sample.getdata() if px >= 245)
+        return pale / float(sample.width * sample.height)
+
+    def _prepare_scan_image(self, image):
+        from PIL import ImageEnhance, ImageOps
+
+        prepared = ImageOps.exif_transpose(image.convert("RGB"))
+        if max(prepared.size) > 2200:
+            prepared.thumbnail((2200, 2200))
+        if self._blank_ratio(prepared) > 0.97:
+            inverted = ImageOps.invert(prepared.convert("RGB"))
+            if self._blank_ratio(inverted) < self._blank_ratio(prepared):
+                prepared = inverted
+        return ImageEnhance.Contrast(prepared).enhance(1.8)
+
+    def _render_pdf_images(self, pdf_path: str, dpi: int = 200):
+        """Collect page scans: rendered pages plus embedded images (common for scans)."""
+        import fitz
+        from PIL import Image
+
+        doc = fitz.open(pdf_path)
+        images = []
+        try:
+            zoom = dpi / 72.0
+            matrix = fitz.Matrix(zoom, zoom)
+            for page_index, page in enumerate(doc):
+                page_images = []
+                for img in page.get_images(full=True):
+                    xref = img[0]
+                    try:
+                        info = doc.extract_image(xref)
+                        embedded = Image.open(io.BytesIO(info["image"])).convert("RGB")
+                    except Exception:
+                        continue
+                    if embedded.width >= 200 and embedded.height >= 200:
+                        page_images.append(self._prepare_scan_image(embedded))
+
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                rendered = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                rendered = self._prepare_scan_image(rendered)
+                if not page_images or self._blank_ratio(rendered) < 0.93:
+                    page_images.insert(0, rendered)
+                if not page_images:
+                    page_images.append(rendered)
+                print(
+                    f"   page {page_index + 1}: {len(page_images)} image(s), "
+                    f"blank_ratio={self._blank_ratio(page_images[0]):.2f}"
+                )
+                images.extend(page_images)
+        finally:
+            doc.close()
+        if not images:
+            raise Exception("PDF has no pages or embedded images to read")
+        return images
+
+    def _configure_tesseract(self) -> None:
+        """Point pytesseract at the usual Windows install path when needed."""
+        import pytesseract
+        import shutil
+
+        if shutil.which("tesseract"):
+            return
+        for candidate in (
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ):
+            if os.path.exists(candidate):
+                pytesseract.pytesseract.tesseract_cmd = candidate
+                return
+
+    def _extract_with_ocr(self, pdf_path: str) -> Tuple[str, int]:
+        """OCR via Tesseract on PyMuPDF page images. AWS Textract is optional."""
+        images = self._render_pdf_images(pdf_path, dpi=180)
+        page_count = len(images)
+
+        aws_key = getattr(config, "AWS_ACCESS_KEY_ID", None)
+        if aws_key and not str(aws_key).startswith("your-"):
+            try:
+                return self._ocr_images_with_textract(images), page_count
+            except Exception as textract_error:
+                print(f"⚠️  AWS Textract not available: {textract_error}")
+
+        return self._ocr_images_with_tesseract(images), page_count
+
+    def _ocr_images_with_textract(self, images) -> str:
+        import boto3
+
+        textract = boto3.client(
+            "textract",
+            region_name=getattr(config, "AWS_REGION", None) or "us-east-1",
+            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+        )
+        extracted_text = ""
+        for page_num, image in enumerate(images, 1):
+            print(f"   Textract processing page {page_num}/{len(images)}...")
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            try:
+                response = textract.detect_document_text(Document={"Bytes": buffer.getvalue()})
+                page_text = "\n".join(
+                    item["Text"] for item in response.get("Blocks", []) if item.get("BlockType") == "LINE"
+                )
+            except Exception as exc:
+                print(f"   ⚠️  Textract failed on page {page_num}: {exc}")
+                page_text = ""
+            extracted_text += f"\n\n--- Page {page_num} ---\n\n{page_text}"
+        return extracted_text.strip()
+
+    def _ocr_images_with_tesseract(self, images) -> str:
         try:
             import pytesseract
-            from pdf2image import convert_from_path
-        except ImportError:
-            raise Exception("Tesseract OCR requires: pip install pytesseract pdf2image pillow")
-        
-        # Convert PDF to images
-        try:
-            images = convert_from_path(pdf_path, dpi=300)
-            page_count = len(images)
-        except Exception as e:
-            raise Exception(f"Failed to convert PDF to images: {e}")
-        
-        # Extract text from each page using Tesseract
+        except ImportError as exc:
+            raise Exception("Tesseract OCR requires: pip install pytesseract pillow") from exc
+
+        self._configure_tesseract()
         extracted_text = ""
-        
         for page_num, image in enumerate(images, 1):
-            print(f"   Tesseract processing page {page_num}/{page_count}...")
-            
+            print(f"   Tesseract processing page {page_num}/{len(images)}...")
             try:
-                # Perform OCR on image
-                page_text = pytesseract.image_to_string(image, lang='eng')
-                extracted_text += f"\n\n--- Page {page_num} ---\n\n" + page_text
-            except Exception as e:
-                print(f"   ⚠️  Tesseract failed on page {page_num}: {e}")
-                extracted_text += f"\n\n--- Page {page_num} (OCR failed) ---\n\n"
-        
-        return extracted_text.strip(), page_count
+                page_text = pytesseract.image_to_string(image, lang="eng")
+            except Exception as exc:
+                print(f"   ⚠️  Tesseract failed on page {page_num}: {exc}")
+                page_text = ""
+            extracted_text += f"\n\n--- Page {page_num} ---\n\n{page_text}"
+        return extracted_text.strip()
+
+    def _extract_with_gpt_vision(self, pdf_path: str, batch_size: int = 3) -> Tuple[str, int]:
+        """Transcribe scanned pages with GPT-4o vision in small batches."""
+        images = self._render_pdf_images(pdf_path, dpi=160)
+        usable = []
+        for index, image in enumerate(images, 1):
+            if self._blank_ratio(image) > 0.98:
+                print(f"   Skipping blank image {index}")
+                continue
+            usable.append((index, image))
+        page_count = len(images)
+        transcribed = []
+
+        for start in range(0, len(usable), batch_size):
+            batch = usable[start:start + batch_size]
+            labels = ", ".join(str(i) for i, _ in batch)
+            print(f"   GPT vision transcribing images {labels} of {page_count}...")
+            content = [{
+                "type": "text",
+                "text": (
+                    f"These are scanned lease images {labels} of {page_count}. "
+                    "Transcribe every visible word verbatim: headings, parties, dates, "
+                    "rent, NNN/CAM, options, and clauses. Label each image. "
+                    "If an image is blank, write BLANK_PAGE for that image. Plain text only."
+                ),
+            }]
+            for _, image in batch:
+                buffer = io.BytesIO()
+                image.convert("RGB").save(buffer, format="JPEG", quality=75)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+                        "detail": "high",
+                    },
+                })
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": content}],
+                temperature=0,
+                max_tokens=4000,
+            )
+            message = response.choices[0].message
+            page_text = (message.content or getattr(message, "refusal", None) or "").strip()
+            if not page_text or page_text.upper() == "BLANK_PAGE":
+                continue
+            transcribed.append(f"--- Images {labels} ---\n{page_text}")
+
+        if not transcribed:
+            raise Exception(
+                f"GPT-4o vision saw {page_count} image(s) but transcribed no text. "
+                "The PDF pages may be blank, encrypted, or your OpenAI key may not allow vision."
+            )
+        return "\n\n".join(transcribed).strip(), page_count
     
     def detect_pii(self, text: str) -> List[str]:
         """
@@ -386,9 +538,9 @@ IMPORTANT INSTRUCTIONS:
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
 
-Context hints:
-{f"Property Address: {property_address}" if property_address else ""}
-{f"Tenant Name: {tenant_name}" if tenant_name else ""}
+Context (do NOT copy these into the JSON unless the same fact appears in the lease text below):
+{f"Uploader-entered property address: {property_address}" if property_address else ""}
+{f"Uploader-entered tenant name: {tenant_name}" if tenant_name else ""}
 
 Lease Document Text ({len(lease_text_to_send):,} characters):
 {lease_text_to_send}
@@ -569,6 +721,12 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"[1/6] Extracting text from PDF: {pdf_path}")
         lease_text, page_count = self.extract_text_from_pdf(pdf_path)
         print(f"✓ Extracted {len(lease_text)} characters from {page_count} pages")
+        if not is_extractable_text(lease_text):
+            raise Exception(
+                "The PDF did not yield readable lease text. "
+                "This is usually a scanned/image PDF. Install Tesseract and Poppler "
+                "(or set AWS Textract keys) and re-upload so OCR can run."
+            )
         
         print(f"[2/6] Scanning for PII...")
         pii_detected = self.detect_pii(lease_text)
@@ -594,7 +752,20 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
         extracted_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
-        print(f"✓ Extracted {len(extracted_fields)} fields")
+        found_count = count_found_fields(extracted_fields)
+        print(f"✓ GPT returned {len(extracted_fields)} field slots, {found_count} with values")
+        if found_count < MIN_FOUND_FIELDS:
+            supabase_client.table("leases").update({
+                "status": "FLAGGED",
+                "extracted_data": extracted_fields,
+            }).eq("id", lease_id).execute()
+            raise Exception(
+                f"Abstraction failed: only {found_count} of {len(self.lease_fields)} "
+                "fields had values. The model did not receive a readable lease body "
+                "(common with scanned PDFs when OCR is skipped). Re-upload after "
+                "installing Tesseract + Poppler or AWS Textract. "
+                "Do not treat this lease as extracted."
+            )
         
         print(f"[5/6] Saving extracted fields to database...")
         field_number = 1

@@ -7,6 +7,7 @@ python-dateutil>=2.8.0       # Date parsing for lease comparison
 # PDF Processing
 PyPDF2>=3.0.0
 pdfplumber>=0.10.0
+pymupdf>=1.24.0              # Digital text + page render without Poppler
 reportlab>=4.0.0             # PDF report generation
 
 # Export Dependencies
