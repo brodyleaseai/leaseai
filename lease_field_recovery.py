@@ -118,16 +118,42 @@ def parse_basic_provisions(text: str) -> Dict[str, str]:
     window = (text[:20000] or "").replace("\u2019", "'").replace("\u2018", "'")
     start = re.search(r"BASIC\s+LEASE\s+PROVISIONS", window, re.I)
     block = window[start.start():] if start else window
+    for stopper in (
+        "The following Exhibits",
+        "1. Lease of Premises",
+        "1. Lease of Premises.",
+        "\n1. ",
+    ):
+        idx = block.find(stopper)
+        if idx > 80:
+            block = block[:idx]
+            break
     found: Dict[str, str] = {}
-    for index, label in enumerate(BASIC_LABELS):
-        rest = BASIC_LABELS[index + 1 :]
-        lookahead = "|".join(re.escape(item) for item in rest) if rest else r"$"
-        pattern = rf"{re.escape(label)}\s*:\s*(.+?)(?=(?:{lookahead})\s*:|$)"
-        match = re.search(pattern, block, re.I | re.S)
-        if match:
-            value = re.sub(r"\s+", " ", match.group(1)).strip(" .;")
-            if value:
-                found[label] = value
+    hits = []
+    for label in sorted(BASIC_LABELS, key=len, reverse=True):
+        for match in re.finditer(rf"{re.escape(label)}\s*:", block, re.I):
+            hits.append((match.start(), match.end(), label))
+    hits.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    chosen = []
+    seen_spans = []
+    seen_labels = set()
+    for start, end, label in hits:
+        if label in seen_labels:
+            continue
+        if any(start < used_end and end > used_start for used_start, used_end in seen_spans):
+            continue
+        seen_labels.add(label)
+        seen_spans.append((start, end))
+        chosen.append((start, end, label))
+    chosen.sort()
+    for index, (start, end, label) in enumerate(chosen):
+        value_end = chosen[index + 1][0] if index + 1 < len(chosen) else len(block)
+        value = re.sub(r"\s+", " ", block[end:value_end]).strip(" .;")
+        value = re.split(r'\s+The\s+[“"”]', value, maxsplit=1)[0].strip(" .;")
+        if len(value) > 280:
+            value = value[:280].rsplit(" ", 1)[0].strip(" .;")
+        if value:
+            found[label] = value
     return found
 
 

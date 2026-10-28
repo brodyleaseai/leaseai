@@ -4,6 +4,7 @@ Generates professional, branded multi-page PDF reports with color-coded confiden
 """
 import io
 from datetime import datetime
+from xml.sax.saxutils import escape
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.lib import colors
@@ -16,6 +17,61 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
 from lease_field_recovery import extracted_display_value
+
+# A single ReportLab table row cannot be taller than the page frame (~654pt).
+MAX_VALUE_CHARS = 1400
+ROWS_PER_TABLE = 10
+FIELD_COL_WIDTHS = [2.0 * inch, 4.0 * inch, 0.9 * inch]
+
+
+def _xml(text) -> str:
+    return escape(str(text if text is not None else "")).replace("\n", "<br/>")
+
+
+def iter_value_chunks(text: str, max_chars: int = MAX_VALUE_CHARS):
+    """Split a clause so each table row stays shorter than one page."""
+    value = str(text if text is not None else "NOT FOUND").strip() or "NOT FOUND"
+    if len(value) <= max_chars:
+        yield value
+        return
+    start = 0
+    while start < len(value):
+        end = min(start + max_chars, len(value))
+        if end < len(value):
+            split_at = value.rfind(" ", start, end)
+            if split_at > start + (max_chars // 2):
+                end = split_at
+        chunk = value[start:end].strip()
+        if chunk:
+            yield chunk
+        start = end
+
+
+def _style_fields_table(table, row_count: int):
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("TOPPADDING", (0, 0), (-1, 0), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.black),
+        ("ALIGN", (0, 1), (0, -1), "LEFT"),
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),
+        ("ALIGN", (2, 1), (2, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 1), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("TOPPADDING", (0, 1), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        *[("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F5F5F5"))
+          for i in range(2, row_count, 2)],
+    ]))
+    return table
 
 
 def _make_colored_box(box_color: str):
@@ -154,10 +210,23 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     story.append(Spacer(1, 0.25 * inch))
     
     # Property Information Box
+    info_label = ParagraphStyle(
+        "InfoLabel",
+        parent=styles["Normal"],
+        fontSize=10,
+        fontName="Helvetica-Bold",
+        alignment=TA_RIGHT,
+    )
+    info_value = ParagraphStyle(
+        "InfoValue",
+        parent=styles["Normal"],
+        fontSize=10,
+        alignment=TA_LEFT,
+    )
     property_info = [
-        ["Property:", extracted_display_value(extracted_fields, "Property Civic Address") or lease_data.get("property_address", "N/A")],
-        ["Tenant:", extracted_display_value(extracted_fields, "Tenant Legal Name") or lease_data.get("tenant_name", "N/A")],
-        ["Generated:", datetime.now().strftime("%B %d, %Y at %I:%M %p")],
+        [Paragraph("Property:", info_label), Paragraph(_xml(extracted_display_value(extracted_fields, "Property Civic Address") or lease_data.get("property_address", "N/A")), info_value)],
+        [Paragraph("Tenant:", info_label), Paragraph(_xml(extracted_display_value(extracted_fields, "Tenant Legal Name") or lease_data.get("tenant_name", "N/A")), info_value)],
+        [Paragraph("Generated:", info_label), Paragraph(_xml(datetime.now().strftime("%B %d, %Y at %I:%M %p")), info_value)],
     ]
     
     prop_table = Table(property_info, colWidths=[1.5 * inch, 4.5 * inch])
@@ -295,13 +364,12 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         leading=11
     )
     
-    field_rows = [[
+    header_row = [
         Paragraph("Field Name", header_style),
         Paragraph("Extracted Value", header_style),
-        Paragraph("Confidence", header_style)  # Full word "Confidence"
-    ]]
+        Paragraph("Confidence", header_style),
+    ]
     
-    # Create a style for wrapped text in table cells
     cell_style = ParagraphStyle(
         'CellStyle',
         parent=styles['Normal'],
@@ -319,69 +387,40 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         alignment=TA_LEFT
     )
     
+    data_rows = []
     for field_name, field_info in extracted_fields.items():
         if isinstance(field_info, dict):
-            value = field_info.get("value", "NOT FOUND")
+            value = field_info.get("reviewed_value") or field_info.get("raw_value") or field_info.get("value", "NOT FOUND")
             confidence = field_info.get("confidence", None)
         else:
             value = str(field_info)
             confidence = None
         
         display_value = str(value) if value else "NOT FOUND"
-        
-        # Use Paragraph for automatic text wrapping
-        field_name_para = Paragraph(field_name.replace("_", " ").title(), field_name_style)
-        value_para = Paragraph(display_value, cell_style)
-        
+        label = str(field_name).replace("_", " ")
         color_hex = _confidence_color(confidence)
-        conf_box = _make_colored_box(color_hex)
-        
-        field_rows.append([
-            field_name_para,
-            value_para,
-            conf_box
-        ])
+        chunks = list(iter_value_chunks(display_value))
+        for index, chunk in enumerate(chunks):
+            data_rows.append([
+                Paragraph(_xml(label if index == 0 else f"{label} (continued)"), field_name_style),
+                Paragraph(_xml(chunk), cell_style),
+                _make_colored_box(color_hex) if index == 0 else "",
+            ])
     
-    # Create fields table with optimized column widths
-    # Total usable width: 7.0 inches (8.5 - 0.75 - 0.75)
-    # Field Name: 2.0", Value: 4.0", Confidence: 0.9"
-    fields_table = Table(
-        field_rows, 
-        colWidths=[2.0 * inch, 4.0 * inch, 0.9 * inch],
-        repeatRows=1  # Repeat header row on each page
-    )
-    fields_table.setStyle(TableStyle([
-        # Header row
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("TOPPADDING", (0, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
-        
-        # Data rows
-        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
-        ("TEXTCOLOR", (0, 1), (-1, -1), colors.black),
-        ("ALIGN", (0, 1), (0, -1), "LEFT"),
-        ("ALIGN", (1, 1), (1, -1), "LEFT"),
-        ("ALIGN", (2, 1), (2, -1), "CENTER"),
-        ("VALIGN", (0, 1), (-1, -1), "TOP"),  # Changed to TOP for better wrapping appearance
-        ("FONTSIZE", (0, 1), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("TOPPADDING", (0, 1), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 8),
-        ("LEFTPADDING", (0, 1), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 1), (-1, -1), 6),
-        ("WORDWRAP", (0, 1), (-1, -1), True),  # Enable word wrap
-        
-        # Alternating row colors
-        *[("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F5F5F5"))
-          for i in range(2, len(field_rows), 2)]
-    ]))
+    # One 80-row table cannot hold a clause taller than the page frame.
+    for start in range(0, len(data_rows), ROWS_PER_TABLE):
+        chunk_rows = [header_row] + data_rows[start:start + ROWS_PER_TABLE]
+        fields_table = Table(
+            chunk_rows,
+            colWidths=FIELD_COL_WIDTHS,
+            repeatRows=1,
+            splitByRow=1,
+        )
+        _style_fields_table(fields_table, len(chunk_rows))
+        story.append(fields_table)
+        story.append(Spacer(1, 0.12 * inch))
     
-    story.append(fields_table)
-    story.append(Spacer(1, 0.5 * inch))
+    story.append(Spacer(1, 0.35 * inch))
     
     # Build the PDF
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)

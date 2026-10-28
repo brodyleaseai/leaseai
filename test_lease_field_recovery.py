@@ -88,6 +88,11 @@ def test_recover_are_terms_that_the_report_missed():
     assert recovered["Landlord Legal Name"]["value"].startswith("ARE-MA REGION NO 59")
     assert recovered["Tenant Legal Name"]["value"].startswith("CAMP4 THERAPEUTICS")
     assert "Cambridge" in recovered["Property Civic Address"]["value"]
+    tenant_addr = recovered.get("Tenant Registered Address", {}).get("value", "")
+    assert "Cambridge" in tenant_addr
+    assert "Commencement Date" not in tenant_addr
+    assert "pipes" not in tenant_addr.lower()
+    assert len(tenant_addr) < 160
     assert recovered["Base Rent Year 1 (monthly)"]["value"] == "$139,997.00"
     assert recovered["Base Rent Year 2 (monthly)"]["value"] == "$144,196.91"
     assert recovered["Free Rent Period (months)"]["value"] == "5 months"
