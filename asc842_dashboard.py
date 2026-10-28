@@ -9,6 +9,7 @@ import plotly.express as px
 from datetime import datetime
 import json
 from asc842_engine import ASC842ComplianceEngine
+from asc842_params import fields_from_rows, params_from_extracted_fields, source_labels, widget_key
 
 
 def render_asc842_compliance_page(supabase, auth):
@@ -58,30 +59,97 @@ def render_new_calculation_tab(supabase, auth):
             return
         
         lease_options = {f"#{l['id']} - {l['property_address']} ({l['tenant_name']})": l['id'] for l in leases}
-        selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()))
+        selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()), key="asc842_admin_selected_lease")
         selected_lease_id = lease_options[selected_lease_label]
+        
+        try:
+            fields_response = supabase.table("extracted_fields").select("*").eq("lease_id", selected_lease_id).execute()
+            field_rows = fields_response.data or []
+        except Exception:
+            field_rows = []
+        
+        params = params_from_extracted_fields(fields_from_rows(field_rows))
+        loaded_terms = source_labels(params)
+        if loaded_terms:
+            st.info("Loaded from this lease: " + ", ".join(loaded_terms) + ". You can still edit any value before calculating.")
+        elif field_rows:
+            st.warning("This lease has extracted fields, but commencement, expiration, or rent could not be parsed. Enter those terms below.")
+        else:
+            st.warning("No extracted terms found for this lease. Review the lease first, or enter the terms below.")
         
         st.markdown("---")
         
-        with st.form("asc842_calculation_form"):
+        with st.form(widget_key(selected_lease_id, "calculation_form")):
             st.subheader("Lease Terms")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                commencement_date = st.date_input("Lease Commencement Date", datetime(2024, 1, 1))
-                end_date = st.date_input("Lease End Date", datetime(2028, 12, 31))
-                monthly_payment = st.number_input("Monthly Base Rent ($)", min_value=0.0, value=5000.0, step=100.0)
+                commencement_date = st.date_input(
+                    "Lease Commencement Date",
+                    params["commencement_date"],
+                    key=widget_key(selected_lease_id, "admin_commencement"),
+                )
+                end_date = st.date_input(
+                    "Lease End Date",
+                    params["end_date"],
+                    key=widget_key(selected_lease_id, "admin_end"),
+                )
+                monthly_payment = st.number_input(
+                    "Monthly Base Rent ($)",
+                    min_value=0.0,
+                    value=float(params["monthly_payment"]),
+                    step=100.0,
+                    key=widget_key(selected_lease_id, "admin_monthly"),
+                )
             
             with col2:
-                discount_rate = st.number_input("Discount Rate (Annual %)", min_value=0.0, max_value=20.0, value=6.0, step=0.1) / 100
-                annual_increase = st.number_input("Annual Rent Increase (%)", min_value=0.0, max_value=10.0, value=0.0, step=0.5) / 100
-                initial_direct_costs = st.number_input("Initial Direct Costs ($)", min_value=0.0, value=0.0, step=100.0)
+                discount_rate = st.number_input(
+                    "Discount Rate (Annual %)",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=6.0,
+                    step=0.1,
+                    key=widget_key(selected_lease_id, "admin_ibr"),
+                ) / 100
+                annual_increase = st.number_input(
+                    "Annual Rent Increase (%)",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=float(params["annual_increase"]),
+                    step=0.5,
+                    key=widget_key(selected_lease_id, "admin_increase"),
+                ) / 100
+                initial_direct_costs = st.number_input(
+                    "Initial Direct Costs ($)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=100.0,
+                    key=widget_key(selected_lease_id, "admin_idc"),
+                )
             
             with col3:
-                lease_incentives = st.number_input("Lease Incentives Received ($)", min_value=0.0, value=0.0, step=100.0)
-                prepayments = st.number_input("Prepayments ($)", min_value=0.0, value=0.0, step=100.0)
-                residual_guarantee = st.number_input("Residual Value Guarantee ($)", min_value=0.0, value=0.0, step=1000.0)
+                lease_incentives = st.number_input(
+                    "Lease Incentives Received ($)",
+                    min_value=0.0,
+                    value=float(params["lease_incentives"]),
+                    step=100.0,
+                    key=widget_key(selected_lease_id, "admin_incentives"),
+                )
+                prepayments = st.number_input(
+                    "Prepayments ($)",
+                    min_value=0.0,
+                    value=float(params.get("prepayments", 0.0)),
+                    step=100.0,
+                    key=widget_key(selected_lease_id, "admin_prepayments"),
+                )
+                residual_guarantee = st.number_input(
+                    "Residual Value Guarantee ($)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1000.0,
+                    key=widget_key(selected_lease_id, "admin_residual"),
+                )
             
             st.markdown("---")
             st.subheader("Lease Options & Complex Terms")
@@ -90,29 +158,62 @@ def render_new_calculation_tab(supabase, auth):
             
             with col1:
                 st.markdown("**Renewal Option**")
-                has_renewal = st.checkbox("Has Renewal Option")
+                has_renewal = st.checkbox(
+                    "Has Renewal Option",
+                    value=params["has_renewal"],
+                    key=widget_key(selected_lease_id, "admin_has_renewal"),
+                )
                 if has_renewal:
-                    renewal_months = st.number_input("Renewal Term (months)", min_value=1, value=12, step=1)
-                    renewal_certain = st.checkbox("Reasonably Certain to Exercise")
+                    renewal_months = st.number_input(
+                        "Renewal Term (months)",
+                        min_value=1,
+                        value=int(params["renewal_months"] or 12),
+                        step=1,
+                        key=widget_key(selected_lease_id, "admin_renewal_months"),
+                    )
+                    renewal_certain = st.checkbox(
+                        "Reasonably Certain to Exercise",
+                        key=widget_key(selected_lease_id, "admin_renewal_certain"),
+                    )
                 else:
                     renewal_months = 0
                     renewal_certain = False
             
             with col2:
                 st.markdown("**Purchase Option**")
-                has_purchase = st.checkbox("Has Purchase Option")
+                has_purchase = st.checkbox("Has Purchase Option", key=widget_key(selected_lease_id, "admin_has_purchase"))
                 if has_purchase:
-                    purchase_price = st.number_input("Purchase Option Price ($)", min_value=0.0, value=0.0, step=1000.0)
-                    purchase_certain = st.checkbox("Reasonably Certain to Purchase")
+                    purchase_price = st.number_input(
+                        "Purchase Option Price ($)",
+                        min_value=0.0,
+                        value=0.0,
+                        step=1000.0,
+                        key=widget_key(selected_lease_id, "admin_purchase_price"),
+                    )
+                    purchase_certain = st.checkbox(
+                        "Reasonably Certain to Purchase",
+                        key=widget_key(selected_lease_id, "admin_purchase_certain"),
+                    )
                 else:
                     purchase_price = 0
                     purchase_certain = False
             
             with col3:
                 st.markdown("**Variable Payments**")
-                has_variable = st.checkbox("Has Variable Payments")
+                has_variable = st.checkbox(
+                    "Has Variable Payments",
+                    value=params["has_variable"],
+                    key=widget_key(selected_lease_id, "admin_has_variable"),
+                )
                 if has_variable:
-                    variable_rate = st.number_input("Variable Rate / Index (%)", min_value=0.0, max_value=10.0, value=0.0, step=0.1) / 100
+                    variable_rate = st.number_input(
+                        "Variable Rate / Index (%)",
+                        min_value=0.0,
+                        max_value=10.0,
+                        value=0.0,
+                        step=0.1,
+                        key=widget_key(selected_lease_id, "admin_variable_rate"),
+                    ) / 100
                 else:
                     variable_rate = 0
             
