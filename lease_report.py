@@ -384,7 +384,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         date_rows.append([
             Paragraph("None resolved", date_cell_style),
             Paragraph("—", date_cell_style),
-            Paragraph("No calendar commencement, expiration, rent start, or notice deadline was found in the extracted fields.", date_cell_style),
+            Paragraph("No commencement, expiration, rent start, renewal notice, or other option deadline was found in the extracted fields.", date_cell_style),
         ])
     dates_table = Table(date_rows, colWidths=[2.1 * inch, 1.4 * inch, 3.4 * inch], repeatRows=1, splitByRow=1)
     _style_fields_table(dates_table, len(date_rows))
