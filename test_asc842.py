@@ -133,6 +133,47 @@ if engine.errors:
 else:
     print("   ✅ No errors")
 
+print("\n9. Inverted dates must not raise KeyError interest_expense...")
+try:
+    inverted = ASC842ComplianceEngine({
+        **lease_data,
+        "commencement_date": "2026-10-29",
+        "end_date": "2015-06-30",
+    })
+    assert inverted.lease_term_months == 0
+    schedule = inverted.generate_liability_amortization_schedule()
+    assert "interest_expense" in schedule.columns
+    try:
+        inverted.run_full_calculation()
+        print("   ❌ Inverted term should raise ValueError")
+        exit(1)
+    except ValueError as error:
+        print(f"   ✅ Guarded inverted term: {error}")
+except Exception as e:
+    print(f"   ❌ Inverted-date guard failed: {e}")
+    import traceback
+    traceback.print_exc()
+    exit(1)
+
+print("\n10. Stonebridge Phase I dates calculate without crashing...")
+try:
+    stone = ASC842ComplianceEngine({
+        **lease_data,
+        "commencement_date": "2008-11-01",
+        "end_date": "2015-06-30",
+        "monthly_payment": 38465.0,
+        "annual_rent_increases": 0.03,
+    })
+    results = stone.run_full_calculation()
+    assert results["lease_term_months"] > 0
+    assert "interest_expense" in stone.liability_schedule.columns
+    print(f"   ✅ Stonebridge term {results['lease_term_months']} months, liability ${results['initial_liability']:,.2f}")
+except Exception as e:
+    print(f"   ❌ Stonebridge calculation failed: {e}")
+    import traceback
+    traceback.print_exc()
+    exit(1)
+
 print("\n" + "=" * 60)
 print("✅ ALL TESTS PASSED!")
 print("ASC 842 engine is working correctly.")

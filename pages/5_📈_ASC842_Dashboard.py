@@ -85,6 +85,8 @@ with tab1:
         
         params = params_from_extracted_fields(fields_from_rows(field_rows))
         loaded_terms = source_labels(params)
+        if params.get("commencement_note"):
+            st.caption("Commencement uses the first calendar date in the extracted field (Phase I if the lease is phased): " + params["commencement_note"])
         if loaded_terms:
             st.info("Loaded from this lease: " + ", ".join(loaded_terms) + ". You can still edit any value before calculating.")
         elif field_rows:
@@ -270,8 +272,18 @@ with tab1:
                         'annual_rent_increases': annual_increase / 100
                     }
                     
+                    if commencement_date >= end_date:
+                        st.error(
+                            "End date must be after the commencement date. "
+                            "If this lease has a phased start, use the Phase I commencement date."
+                        )
+                        st.stop()
+
                     # Initialize ASC 842 engine
                     engine = ASC842ComplianceEngine(lease_data)
+                    if engine.lease_term_months <= 0:
+                        st.error(engine.errors[-1] if engine.errors else "Lease term must be at least one month.")
+                        st.stop()
                     
                     # Run full calculation (this does everything at once)
                     results = engine.run_full_calculation()
