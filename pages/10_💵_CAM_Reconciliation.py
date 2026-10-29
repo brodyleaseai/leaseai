@@ -302,12 +302,11 @@ with tab2:
                     with st.spinner("Extracting CAM provisions using GPT-4o..."):
                         try:
                             from cam_gpt_extractor import extract_cam_provisions_with_gpt, save_cam_provisions_to_db
-                            import openai
+                            from openai_key import get_openai_api_key
                             
-                            # Get OpenAI API key
-                            api_key = st.secrets.get("OPENAI_API_KEY")
+                            api_key = get_openai_api_key()
                             if not api_key:
-                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                                st.error("OpenAI API key not configured. Set OPENAI_API_KEY in your .env or config.py — the same key used for lease extraction.")
                             else:
                                 # Fetch lease text
                                 lease_res = sb.table("leases").select("*").eq("id", selected_lease_id).execute()
@@ -411,11 +410,11 @@ with tab2:
                     try:
                         from cam_gpt_extractor import parse_cam_statement_with_gpt, extract_text_from_pdf
                         import tempfile
+                        from openai_key import get_openai_api_key
                         
-                        # Get OpenAI API key
-                        api_key = st.secrets.get("OPENAI_API_KEY")
+                        api_key = get_openai_api_key()
                         if not api_key:
-                            st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                            st.error("OpenAI API key not configured. Set OPENAI_API_KEY in your .env or config.py — the same key used for lease extraction.")
                         else:
                             # Save uploaded file temporarily
                             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
