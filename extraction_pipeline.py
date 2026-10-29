@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
-from lease_field_recovery import merge_extracted_fields, recover_lease_fields
+from lease_field_recovery import apply_lease_escalation, merge_extracted_fields, recover_lease_fields
 
 # Scanned PDFs often yield >100 junk characters (page numbers, "l" glyphs,
 # CID font leftovers). Require real words before skipping OCR.
@@ -541,6 +541,7 @@ IMPORTANT INSTRUCTIONS:
 - RULE D: If Rent Commencement Date is N months after Commencement Date, Free Rent Period is N months.
 - RULE E: Read Basic Lease Provisions and exhibits. Uploader-entered address/tenant names are hints only — never copy them if the lease states different parties or a different building.
 - RULE F: Address fields (Tenant Registered Address, Landlord Contact / Notice Address, Property Civic Address) are street, city, state/ZIP, and Attention only. Stop at the next heading such as "The following Exhibits" or "1. Lease of Premises". Never paste later lease sections into an address field.
+- RULE G: Annual Escalation Rate or Cap is this lease’s current-premises increase only. Use a labeled rate (Rent Adjustment Percentage, annual increase of X%). If the lease only prints a stepped Base Rent table, report the consistent year-over-year rate after occupancy is stable and note that it is derived. Do not use CAM “3% of gross receipts”, expansion-option 3%, a default 3%, or a rate from any other lease. If there is no stated rate and no consistent table, use NOT FOUND.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
@@ -600,7 +601,8 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
     def complete_extracted_fields(self, lease_text: str, model_fields: Dict = None) -> Dict:
         """Fill required slots with recovered Basic Lease Provisions when the model misses them."""
         recovered = recover_lease_fields(lease_text)
-        return merge_extracted_fields(self.lease_fields, model_fields or {}, recovered)
+        merged = merge_extracted_fields(self.lease_fields, model_fields or {}, recovered)
+        return apply_lease_escalation(merged, lease_text)
     
     def calculate_confidence_score(self, confidence_str: str) -> float:
         """
