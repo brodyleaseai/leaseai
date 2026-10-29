@@ -108,6 +108,12 @@ def is_duration_formula(value: str) -> bool:
     return bool(re.search(r"\d+\s+months?\s+(from|after|following)", lower))
 
 
+NAMED_DATE = re.compile(
+    r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}",
+    re.I,
+)
+
+
 def parse_date_value(value: str) -> Optional[date]:
     if not value:
         return None
@@ -116,6 +122,12 @@ def parse_date_value(value: str) -> Optional[date]:
     if leading:
         try:
             return datetime.strptime(leading.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    named = NAMED_DATE.search(text)
+    if named:
+        try:
+            return datetime.strptime(named.group(0).replace(",", ""), "%B %d %Y").date()
         except ValueError:
             pass
     if is_duration_formula(text):
@@ -246,4 +258,7 @@ def params_from_extracted_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
         "source_end": bool(end),
         "source_rent": bool(_field_value(fields, FIELD_ALIASES["monthly_payment"])),
         "source_increase": bool(_field_value(fields, FIELD_ALIASES["annual_increase"])),
+        "commencement_note": commence_text if commence and (
+            "phase" in commence_text.lower() or "conditional" in commence_text.lower()
+        ) else "",
     }

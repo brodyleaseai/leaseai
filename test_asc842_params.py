@@ -111,6 +111,28 @@ def test_building_1400_conditional_term_becomes_end_date():
     assert params["monthly_payment"] == 139997.0
 
 
+def test_stoneridge_phased_commencement_uses_phase_one():
+    assert parse_date_value(
+        "CONDITIONAL: Phase I Premises: November 1, 2008; Phase II Premises: July 1, 2010"
+    ) == date(2008, 11, 1)
+    params = params_from_extracted_fields({
+        "Lease Commencement Date": {
+            "raw_value": "CONDITIONAL: Phase I Premises: November 1, 2008; Phase II Premises: July 1, 2010",
+        },
+        "Lease Expiration Date": {"raw_value": "2015-06-30"},
+        "Base Rent Year 1 (monthly)": {"raw_value": "$38,465.00"},
+        "Annual Escalation Rate or Cap": {"raw_value": "3%"},
+        "Number of Renewal Options": {"raw_value": "1"},
+        "Renewal Option Term Length": {"raw_value": "3 or 5 years"},
+    })
+    assert params["commencement_date"] == date(2008, 11, 1)
+    assert params["end_date"] == date(2015, 6, 30)
+    assert params["monthly_payment"] == 38465.0
+    assert params["source_commencement"] is True
+    assert "Phase I" in params["commencement_note"]
+    assert params["end_date"] > params["commencement_date"]
+
+
 def test_end_date_formula_without_separate_term_field():
     params = params_from_extracted_fields({
         "Lease Commencement Date": {"value": "July 1, 2020"},
@@ -127,5 +149,6 @@ if __name__ == "__main__":
     test_reviewed_value_beats_raw_and_skips_not_found()
     test_widget_keys_change_with_lease()
     test_building_1400_conditional_term_becomes_end_date()
+    test_stoneridge_phased_commencement_uses_phase_one()
     test_end_date_formula_without_separate_term_field()
     print("test_asc842_params.py: all tests passed")
