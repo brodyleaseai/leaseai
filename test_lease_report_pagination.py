@@ -48,6 +48,12 @@ def test_pdf_builds_with_eighty_fields_and_huge_clause():
         "confidence": "HIGH",
     }
     fields["Lease Term (Total Months)"] = {"value": "84 months", "confidence": "HIGH"}
+    fields["Renewal Notice Deadline"] = {
+        "value": "Not less than nine (9) months, nor more than twelve (12) months, prior to expiration",
+        "confidence": "HIGH",
+    }
+    fields["Number of Renewal Options"] = {"value": "1", "confidence": "HIGH"}
+    fields["Renewal Option Term Length"] = {"value": "3 or 5 years", "confidence": "HIGH"}
 
     pdf = generate_lease_abstract_pdf(
         {"property_address": "26 North Euclid Ave", "tenant_name": "ARE LLC"},
@@ -57,8 +63,33 @@ def test_pdf_builds_with_eighty_fields_and_huge_clause():
     assert len(pdf) > 2000
 
 
+def test_pdf_critical_dates_include_workday_renewal():
+    from io import BytesIO
+
+    import pdfplumber
+
+    from test_critical_date_extract import WORKDAY
+
+    fields = {name: {"value": item["raw_value"], "confidence": "HIGH"} for name, item in WORKDAY.items()}
+    pdf = generate_lease_abstract_pdf(
+        {
+            "property_address": "6230 Stoneridge Mall Road, Pleasanton, California",
+            "tenant_name": "WORKDAY, INC.",
+        },
+        fields,
+    )
+    with pdfplumber.open(BytesIO(pdf)) as doc:
+        text = "\n".join(page.extract_text() or "" for page in doc.pages)
+    assert "Critical Dates" in text
+    assert "Renewal Notice Deadline" in text
+    assert "2014-09-30" in text
+    assert "Renewal Option Commencement" in text
+    assert "Early Termination Right" in text
+
+
 if __name__ == "__main__":
     test_iter_value_chunks_keeps_short_text()
     test_iter_value_chunks_splits_long_clause()
     test_pdf_builds_with_eighty_fields_and_huge_clause()
+    test_pdf_critical_dates_include_workday_renewal()
     print("test_lease_report_pagination.py: all tests passed")

@@ -100,11 +100,11 @@ with tab1:
                         from health_report_generator import generate_health_report
                         from anomaly_detection_engine import scan_portfolio_for_anomalies
                         
-                        # Get OpenAI key
-                        openai_key = st.secrets.get("OPENAI_API_KEY")
+                        from openai_key import get_openai_api_key
+                        openai_key = get_openai_api_key()
                         
                         if not openai_key:
-                            st.error("OpenAI API key not configured. Add OPENAI_API_KEY to secrets.")
+                            st.error("OpenAI API key not configured. Set OPENAI_API_KEY in your .env or config.py.")
                         else:
                             # First scan for anomalies
                             st.info("Step 1/2: Scanning for anomalies...")
@@ -149,7 +149,8 @@ with tab1:
                             from health_report_generator import generate_health_report
                             from anomaly_detection_engine import scan_portfolio_for_anomalies
                             
-                            openai_key = st.secrets.get("OPENAI_API_KEY")
+                            from openai_key import get_openai_api_key
+                            openai_key = get_openai_api_key()
                             scan_portfolio_for_anomalies(sb, client_id)
                             generate_health_report(sb, openai_key, client_id)
                             st.success("Report refreshed!")
