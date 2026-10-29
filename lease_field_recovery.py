@@ -78,6 +78,87 @@ def _percent(text: str) -> Optional[float]:
     return number * 100 if number <= 1 else number
 
 
+def _escalation_context_is_current_premises(text: str, start: int) -> bool:
+    window = text[max(0, start - 280): start + 160]
+    if re.search(
+        r"expansion|right of first|ROFO|ROFR|additional space|6210|management fees|gross receipts",
+        window,
+        re.I,
+    ):
+        return False
+    return True
+
+
+def _explicit_rent_escalation(text: str) -> Optional[Tuple[float, str]]:
+    """Return a labeled current-premises increase, not CAM or expansion 3%."""
+    patterns = (
+        r"Rent Adjustment Percentage\s*:\s*([\d.]+)\s*%",
+        r"(?:annual(?:ly)?|yearly)\s+(?:rent\s+)?(?:increase|escalation|adjustment)\s+(?:of|at|rate(?:\s+of)?)\s+([\d.]+)\s*%",
+        r"(?:increase|escalat(?:e|ion)|adjust(?:ment)?)\s+(?:of\s+)?([\d.]+)\s*%\s+(?:per\s+year|annually|each year|per annum)",
+        r"([\d.]+)\s*%\s+(?:per\s+year|annual(?:ly)?)\s+(?:increase|escalation|adjustment)",
+    )
+    source = (text or "").replace("\u2019", "'")
+    for pattern in patterns:
+        for match in re.finditer(pattern, source, re.I):
+            if not _escalation_context_is_current_premises(source, match.start()):
+                continue
+            return float(match.group(1)), match.group(0).strip()
+    return None
+
+
+def _table_rent_amounts(text: str) -> List[float]:
+    amounts = [
+        float(item.replace(",", ""))
+        for item in re.findall(r"=\s*\$\s*([\d,]+(?:\.\d{2}))", text or "")
+    ]
+    if len(amounts) >= 3:
+        return amounts
+    years = []
+    for match in re.finditer(r"Year\s+(\d+)\s*:\s*\$\s*([\d,]+(?:\.\d{2})?)", text or "", re.I):
+        years.append((int(match.group(1)), float(match.group(2).replace(",", ""))))
+    years.sort()
+    return [amount for _, amount in years]
+
+
+def _consistent_schedule_rate(amounts: List[float]) -> Optional[float]:
+    if len(amounts) < 3:
+        return None
+    start = 1 if amounts[1] > amounts[0] * 1.15 else 0
+    rates = []
+    for prior, nxt in zip(amounts[start:], amounts[start + 1:]):
+        if prior <= 0:
+            return None
+        rates.append((nxt / prior - 1) * 100)
+    if len(rates) < 2:
+        return None
+    if max(rates) - min(rates) > 0.25:
+        return None
+    return round(sum(rates) / len(rates), 2)
+
+
+def resolve_annual_escalation(lease_text: str) -> Optional[Dict[str, str]]:
+    """Resolve this lease's increase only. Never default to 3%."""
+    explicit = _explicit_rent_escalation(lease_text)
+    if explicit:
+        rate, snippet = explicit
+        return _field(
+            f"{rate:g}%",
+            "HIGH",
+            snippet,
+            "Stated in this lease for the current premises",
+        )
+    amounts = _table_rent_amounts(lease_text)
+    rate = _consistent_schedule_rate(amounts)
+    if rate is None:
+        return None
+    return _field(
+        f"{rate:g}%",
+        "MEDIUM",
+        "Base Rent schedule after stable occupancy",
+        "Derived from this lease's Base Rent steps, not a labeled percentage clause",
+    )
+
+
 def _rsf(text: str) -> Optional[float]:
     match = re.search(
         r"([\d,]+(?:\.\d+)?)\s*(?:rentable\s+)?(?:square\s+feet|sq\.?\s*ft|rsf)",
@@ -469,17 +550,16 @@ def recover_lease_fields(lease_text: str) -> Dict[str, Dict[str, str]]:
         )
 
     increase = _percent(basic.get("Rent Adjustment Percentage", ""))
-    if increase is None:
-        inc_match = re.search(r"Rent Adjustment Percentage:\s*([\d.]+)\s*%", text, re.I)
-        if inc_match:
-            increase = float(inc_match.group(1))
-    if increase is not None:
-        recovered["Annual Escalation Rate or Cap"] = _field(f"{increase:g}%", "HIGH", f"Rent Adjustment Percentage: {increase:g}%")
+    escalation = resolve_annual_escalation(text)
+    if escalation:
+        recovered["Annual Escalation Rate or Cap"] = escalation
         recovered["Annual Escalation Type (Fixed / CPI / Percentage)"] = _field(
             "Percentage",
-            "HIGH",
-            f"Rent Adjustment Percentage: {increase:g}%",
+            escalation["confidence"],
+            escalation.get("source_snippet") or "",
+            escalation.get("notes") or "",
         )
+        increase = _percent(escalation["value"]) if increase is None else increase
 
     monthly, rent_note = _monthly_from_base_rent(basic.get("Base Rent", ""), premises_rsf)
     if monthly:
@@ -622,6 +702,34 @@ def _address_overflow(field_name: str, value: str) -> bool:
     if len(value) > 220:
         return True
     return bool(re.search(r"The following Exhibits|pipes,?\s+ducts|1\.\s+Lease of Premises", value, re.I))
+
+
+def apply_lease_escalation(fields: Dict[str, Any], lease_text: str) -> Dict[str, Any]:
+    """Overwrite a guessed rate with this lease's stated or schedule-derived rate."""
+    updated = dict(fields or {})
+    resolved = resolve_annual_escalation(lease_text)
+    current = updated.get("Annual Escalation Rate or Cap")
+    current_value = ""
+    if isinstance(current, dict):
+        current_value = _usable(current.get("reviewed_value") or current.get("raw_value") or current.get("value"))
+    else:
+        current_value = _usable(current)
+    if resolved:
+        updated["Annual Escalation Rate or Cap"] = {k: v for k, v in resolved.items() if k != "prefer"}
+        updated["Annual Escalation Type (Fixed / CPI / Percentage)"] = {
+            "value": "Percentage",
+            "confidence": resolved["confidence"],
+            "source_snippet": resolved.get("source_snippet") or "",
+            "notes": resolved.get("notes") or "",
+        }
+    elif current_value and not _explicit_rent_escalation(lease_text) and not _consistent_schedule_rate(_table_rent_amounts(lease_text)):
+        updated["Annual Escalation Rate or Cap"] = {
+            "value": "NOT FOUND",
+            "confidence": "LOW",
+            "source_snippet": "",
+            "notes": "No stated current-premises increase and no consistent Base Rent steps in this lease",
+        }
+    return updated
 
 
 def extracted_display_value(fields: Dict[str, Any], *names: str) -> str:

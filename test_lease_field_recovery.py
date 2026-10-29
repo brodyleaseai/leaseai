@@ -1,9 +1,11 @@
 from lease_field_recovery import (
+    apply_lease_escalation,
     clip_postal_address,
     extract_labeled_address,
     merge_extracted_fields,
     parse_basic_provisions,
     recover_lease_fields,
+    resolve_annual_escalation,
 )
 from extraction_pipeline import LeaseExtractionPipeline
 
@@ -174,6 +176,71 @@ def test_merge_replaces_overflowing_gpt_tenant_address():
     assert len(value) < 160
 
 
+STONERIDGE_RENT_TABLE = """
+OFFICE LEASE AGREEMENT
+6200 STONERIDGE MALL ROAD INVESTORS LLC and WORKDAY, INC.
+Base Rent:
+November 1, 2008 – June 30, 2010  30,772 x $1.25 =$38,465.00
+July 1, 2010 – June 30, 2011  69,132 x $2.50 =$172,830.00
+July 1, 2011 – June 30, 2012  69,132 x $2.58 =$178,014.90
+July 1, 2012 – June 30, 2013  69,132 x $2.66 =$183,355.35
+July 1, 2013 – June 30, 2014  69,132 x $2.74 =$188,856.01
+July 1, 2014 – June 30, 2015  69,132 x $2.82 =$194,521.69
+(xix) property management fees to the extent the same exceed three percent (3%) of gross receipts
+In the event Tenant validly exercises the 6210 Expansion Option, Base Rent shall be $2.50 per square foot
+with a cumulative annual increase of three percent (3%).
+"""
+
+FLAT_RENT_LEASE = """
+LEASE AGREEMENT between OTHER LANDLORD LLC and OTHER TENANT INC.
+Base Rent shall be $5,000.00 per month throughout the Term. There is no annual increase.
+"""
+
+CAM_ONLY_THREE_PERCENT = """
+LEASE AGREEMENT between CAM LANDLORD LLC and CAM TENANT INC.
+Base Rent is $8,000 per month for the entire Term.
+Excluded from Expenses: property management fees to the extent the same exceed three percent (3%) of gross receipts.
+"""
+
+
+def test_stoneridge_escalation_is_derived_from_this_lease_schedule():
+    resolved = resolve_annual_escalation(STONERIDGE_RENT_TABLE)
+    assert resolved["value"] == "3%"
+    assert "derived" in resolved["notes"].lower()
+    recovered = recover_lease_fields(STONERIDGE_RENT_TABLE)
+    assert recovered["Annual Escalation Rate or Cap"]["value"] == "3%"
+
+
+def test_are_escalation_stays_the_stated_label():
+    resolved = resolve_annual_escalation(ARE_EXCERPT)
+    assert resolved["value"] == "3%"
+    assert "Stated" in resolved["notes"]
+
+
+def test_cam_or_expansion_three_percent_is_not_this_lease_rate():
+    assert resolve_annual_escalation(CAM_ONLY_THREE_PERCENT) is None
+    merged = apply_lease_escalation(
+        {"Annual Escalation Rate or Cap": {"value": "3%", "confidence": "HIGH"}},
+        CAM_ONLY_THREE_PERCENT,
+    )
+    assert merged["Annual Escalation Rate or Cap"]["value"] == "NOT FOUND"
+
+
+def test_escalation_is_resolved_per_lease_not_copied():
+    other = """
+    LEASE AGREEMENT
+    Rent Adjustment Percentage: 2.5%
+    Base Rent: $10,000 per month
+    """
+    first = resolve_annual_escalation(ARE_EXCERPT)["value"]
+    second = resolve_annual_escalation(other)["value"]
+    third = resolve_annual_escalation(STONERIDGE_RENT_TABLE)["value"]
+    assert first == "3%"
+    assert second == "2.5%"
+    assert third == "3%"
+    assert resolve_annual_escalation(FLAT_RENT_LEASE) is None
+
+
 def test_full_are_pdf_recovers_same_economics():
     from pathlib import Path
 
@@ -208,5 +275,9 @@ if __name__ == "__main__":
     test_merge_overwrites_not_found_model_values()
     test_clip_stops_after_attention_and_drops_lease_body()
     test_merge_replaces_overflowing_gpt_tenant_address()
+    test_stoneridge_escalation_is_derived_from_this_lease_schedule()
+    test_are_escalation_stays_the_stated_label()
+    test_cam_or_expansion_three_percent_is_not_this_lease_rate()
+    test_escalation_is_resolved_per_lease_not_copied()
     test_full_are_pdf_recovers_same_economics()
     print("test_lease_field_recovery.py: all tests passed")
