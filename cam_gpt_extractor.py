@@ -8,10 +8,29 @@ This module handles:
 - Intelligent categorization of CAM charges
 """
 
-import os
 import json
-from typing import Dict, List, Optional
+import re
+from datetime import datetime
+from typing import Dict
+
 import openai
+
+
+def fill_prompt(template: str, **values: str) -> str:
+    """Replace {name} slots without treating JSON example braces as format fields."""
+    filled = template
+    for name, value in values.items():
+        filled = filled.replace("{" + name + "}", value or "")
+    return filled
+
+
+def parse_json_object(raw: str) -> Dict:
+    """Parse a model JSON object, including optional markdown fences."""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
 
 
 class CAMProvisionGPTExtractor:
@@ -81,13 +100,16 @@ Lease Document:
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a commercial real estate lease analyst. Extract CAM provisions and return valid JSON only."},
-                    {"role": "user", "content": CAMProvisionGPTExtractor.CAM_EXTRACTION_PROMPT.format(lease_text=lease_text[:15000])}  # Limit to 15k chars
+                    {"role": "user", "content": fill_prompt(
+                        CAMProvisionGPTExtractor.CAM_EXTRACTION_PROMPT,
+                        lease_text=(lease_text or "")[:15000],
+                    )},
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"}
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = parse_json_object(response.choices[0].message.content)
             
             # Validate and add confidence scores
             result['extraction_method'] = 'GPT-4o'
@@ -178,13 +200,16 @@ CAM Statement:
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a CAM charge auditor. Parse the statement and return valid JSON only."},
-                    {"role": "user", "content": CAMStatementGPTParser.CAM_PARSING_PROMPT.format(statement_text=statement_text[:20000])}
+                    {"role": "user", "content": fill_prompt(
+                        CAMStatementGPTParser.CAM_PARSING_PROMPT,
+                        statement_text=(statement_text or "")[:20000],
+                    )},
                 ],
                 temperature=0.1,
                 response_format={"type": "json_object"}
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = parse_json_object(response.choices[0].message.content)
             
             # Add metadata
             result['parsing_method'] = 'GPT-4o'
