@@ -3,7 +3,9 @@ from lease_field_recovery import (
     clip_postal_address,
     extract_labeled_address,
     merge_extracted_fields,
+    monthly_from_annual_psf,
     parse_basic_provisions,
+    parse_form_rental_summary,
     recover_lease_fields,
     resolve_annual_escalation,
 )
@@ -241,6 +243,54 @@ def test_escalation_is_resolved_per_lease_not_copied():
     assert resolve_annual_escalation(FLAT_RENT_LEASE) is None
 
 
+DIXIE_RENTAL_TABLE = """
+LEASE AGREEMENT
+2. PREMISES: approx. 6956 gross square feet being 18.06% of leasable space at Bentonville Colonnade
+4. RENTAL AND PAYMENT SUMMARY:
+$ 14.75 per square foot per year "Rental"*
++ $ 1.25 per square foot per year "CAM"** (per paragraph 14)
+= $ 16.00 per square foot per year
+x 6956 square footage leased
+= $111,296.00 YEARLY PAYMENT
+÷ (12) months
+= $ 9,274.67 Total Monthly Payment (subject to terms herein)
+"""
+
+DIXIE_OCR_MISSING_RENTAL_LINE = """
+2. PREMISES: approx. 6956 gross square feet being 18.06% of leasable space
+125 per square foot per year "CAM"** (per paragraph 14)
+16.00 per square foot per year
+6956 square footage leased
+$111,296.00 YEARLY PAYMENT
+$ 9,274.67 Total Monthly Payment
+"""
+
+
+def test_dixie_monthly_rent_is_8550_08_not_8553_08():
+    assert monthly_from_annual_psf(14.75, 6956) == 8550.08
+    assert monthly_from_annual_psf(14.75, 6956) != 8553.08
+    parsed = parse_form_rental_summary(DIXIE_RENTAL_TABLE)
+    assert parsed["monthly"] == 8550.08
+    assert parsed["rsf"] == 6956
+    assert parsed["rental_psf"] == 14.75
+    recovered = recover_lease_fields(DIXIE_RENTAL_TABLE)
+    assert recovered["Base Rent Year 1 (monthly)"]["value"] == "$8,550.08"
+    assert "$9,274.67" not in recovered["Base Rent Year 1 (monthly)"]["value"]
+    pipeline = LeaseExtractionPipeline.__new__(LeaseExtractionPipeline)
+    pipeline.lease_fields = ["Base Rent Year 1 (monthly)", "Premises Square Footage (RSF)"]
+    merged = pipeline.complete_extracted_fields(DIXIE_RENTAL_TABLE, {
+        "Base Rent Year 1 (monthly)": {"value": "$8,553.08", "confidence": "HIGH"},
+    })
+    assert merged["Base Rent Year 1 (monthly)"]["value"] == "$8,550.08"
+
+
+def test_dixie_ocr_can_derive_rental_psf_from_cam_and_total():
+    parsed = parse_form_rental_summary(DIXIE_OCR_MISSING_RENTAL_LINE)
+    assert parsed is not None
+    assert parsed["rental_psf"] == 14.75
+    assert parsed["monthly"] == 8550.08
+
+
 def test_full_are_pdf_recovers_same_economics():
     from pathlib import Path
 
@@ -279,5 +329,7 @@ if __name__ == "__main__":
     test_are_escalation_stays_the_stated_label()
     test_cam_or_expansion_three_percent_is_not_this_lease_rate()
     test_escalation_is_resolved_per_lease_not_copied()
+    test_dixie_monthly_rent_is_8550_08_not_8553_08()
+    test_dixie_ocr_can_derive_rental_psf_from_cam_and_total()
     test_full_are_pdf_recovers_same_economics()
     print("test_lease_field_recovery.py: all tests passed")
