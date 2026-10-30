@@ -443,7 +443,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         notes = ""
         if isinstance(field_info, dict):
             notes = str(field_info.get("notes") or "").strip()
-        if notes and "escalation" in str(field_name).lower() and display_value.upper() not in {"NOT FOUND", ""}:
+        if notes and any(token in str(field_name).lower() for token in ("escalation", "base rent year 1")) and display_value.upper() not in {"NOT FOUND", ""}:
             display_value = f"{display_value} — {notes}"
         label = str(field_name).replace("_", " ")
         color_hex = _confidence_color(confidence)

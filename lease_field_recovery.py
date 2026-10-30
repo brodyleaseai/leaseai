@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 NOT_FOUND = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN", "—", "-"}
@@ -63,6 +64,65 @@ def _money(text: str) -> Optional[float]:
         return float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+
+
+def _cents(value: Decimal) -> float:
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def monthly_from_annual_psf(psf: float, rsf: float) -> float:
+    """PSF per year × RSF / 12, rounded to cents. 14.75 × 6956 / 12 = 8550.08."""
+    return _cents(Decimal(str(psf)) * Decimal(str(rsf)) / Decimal("12"))
+
+
+def _psf_rate(raw: str) -> Decimal:
+    value = Decimal(raw)
+    # OCR often drops the decimal: 125 → 1.25, 1475 → 14.75
+    if value >= 20 and "." not in raw:
+        value = value / Decimal("100")
+    return value
+
+
+def parse_form_rental_summary(text: str) -> Optional[Dict[str, Any]]:
+    """Read a Section 4 rental table: rental PSF, CAM PSF, SF, yearly total."""
+    window = (text or "")[:15000].replace("\u2019", "'")
+    rental_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*per\s+square\s+foot\s+per\s+year\s*[\"“']?Rental",
+        window,
+        re.I,
+    )
+    cam_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*per\s+square\s+foot\s+per\s+year\s*[\"“']?CAM",
+        window,
+        re.I,
+    )
+    combined = None
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*per\s+square\s+foot\s+per\s+year", window, re.I):
+        following = window[match.end(): match.end() + 24]
+        if re.match(r"\s*[\"“']?(Rental|CAM)", following, re.I):
+            continue
+        combined = _psf_rate(match.group(1))
+        break
+    rental_psf = _psf_rate(rental_match.group(1)) if rental_match else None
+    cam_psf = _psf_rate(cam_match.group(1)) if cam_match else None
+    if rental_psf is None and cam_psf is not None and combined is not None:
+        rental_psf = combined - cam_psf
+    sf_match = re.search(
+        r"(?:approx\.?\s*)?(\d{3,5})\s*(?:gross\s+)?(?:square\s+feet|square\s+footage\s+leased)",
+        window,
+        re.I,
+    )
+    if rental_psf is None or not sf_match:
+        return None
+    rsf = Decimal(sf_match.group(1))
+    monthly = monthly_from_annual_psf(float(rental_psf), float(rsf))
+    return {
+        "monthly": monthly,
+        "rsf": float(rsf),
+        "rental_psf": float(rental_psf),
+        "cam_psf": float(cam_psf) if cam_psf is not None else None,
+        "note": f"{rental_psf} per RSF per year × {rsf:,.0f} SF / 12",
+    }
 
 
 def _percent(text: str) -> Optional[float]:
@@ -161,7 +221,7 @@ def resolve_annual_escalation(lease_text: str) -> Optional[Dict[str, str]]:
 
 def _rsf(text: str) -> Optional[float]:
     match = re.search(
-        r"([\d,]+(?:\.\d+)?)\s*(?:rentable\s+)?(?:square\s+feet|sq\.?\s*ft|rsf)",
+        r"([\d,]+(?:\.\d+)?)\s*(?:gross\s+|rentable\s+)?(?:square\s+feet|square\s+footage|sq\.?\s*ft|rsf)",
         text or "",
         re.I,
     )
@@ -364,12 +424,12 @@ def _monthly_from_base_rent(base_rent: str, rsf: Optional[float]) -> Tuple[Optio
         return amount, "monthly amount stated in the lease"
     if rsf and ("square foot" in lower or "rsf" in lower or "sq. ft" in lower or "sq ft" in lower):
         if "year" in lower or "annum" in lower or "annual" in lower:
-            monthly = round(amount * rsf / 12.0, 2)
+            monthly = monthly_from_annual_psf(amount, rsf)
             return monthly, f"{amount:.2f} per RSF per year × {rsf:,.0f} RSF / 12"
-        monthly = round(amount * rsf, 2)
+        monthly = _cents(Decimal(str(amount)) * Decimal(str(rsf)))
         return monthly, f"{amount:.2f} per RSF per month × {rsf:,.0f} RSF"
     if "year" in lower or "annum" in lower or "annual" in lower:
-        return round(amount / 12.0, 2), "annual rent / 12"
+        return _cents(Decimal(str(amount)) / Decimal("12")), "annual rent / 12"
     return amount, "rent amount stated in the lease"
 
 
@@ -561,7 +621,25 @@ def recover_lease_fields(lease_text: str) -> Dict[str, Dict[str, str]]:
         )
         increase = _percent(escalation["value"]) if increase is None else increase
 
+    form_rent = parse_form_rental_summary(text)
+    if form_rent:
+        premises_rsf = premises_rsf or form_rent["rsf"]
+        recovered["Premises Square Footage (RSF)"] = recovered.get("Premises Square Footage (RSF)") or _field(
+            f"{form_rent['rsf']:,.0f} rentable square feet",
+            "HIGH",
+            f"{form_rent['rsf']:,.0f} square footage leased",
+        )
+        if form_rent.get("cam_psf") is not None:
+            recovered["CAM / Operating Cost Charges"] = _field(
+                f"${form_rent['cam_psf']:.2f} per square foot per year",
+                "HIGH",
+                "CAM line in the rental summary",
+            )
+
     monthly, rent_note = _monthly_from_base_rent(basic.get("Base Rent", ""), premises_rsf)
+    if form_rent:
+        monthly = form_rent["monthly"]
+        rent_note = form_rent["note"]
     if monthly:
         recovered["Base Rent Year 1 (monthly)"] = _field(
             f"${monthly:,.2f}",
