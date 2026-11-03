@@ -123,7 +123,8 @@ class PageSourceTests(unittest.TestCase):
     def test_query_engine_empty_state_does_not_stop_the_page(self):
         source = PAGE_PATH.read_text(encoding="utf-8")
         self.assertEqual(source.count("st.stop()"), 1)
-        self.assertIn('render_amendment_upload(selected_lease_id, "sidebar")', source)
+        self.assertIn('render_amendment_upload(selected_lease_id, "tab")', source)
+        self.assertNotIn('render_amendment_upload(selected_lease_id, "sidebar")', source)
         tab3_idx = source.find("# TAB 3:")
         tab4_idx = source.find("# TAB 4:")
         self.assertGreater(tab3_idx, 0)
@@ -167,8 +168,10 @@ class AppTests(unittest.TestCase):
         """The just-processed lease case: no clause history yet."""
         app = self._run_page(_client_for([LEASE_EMPTY]))
         self.assertFalse(app.exception)
-        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertEqual(len(app.file_uploader), 1)
         self.assertEqual(app.file_uploader[0].label, "Upload Amendment PDF")
+        self.assertTrue(any("Amendment Report" in tab.label for tab in app.tabs))
+        self.assertGreaterEqual(len(app.download_button), 1)
 
     def test_history_with_braces_does_not_kill_uploader(self):
         """A lease whose clause text contains `{` used to crash tab 2 via f-string."""
@@ -187,7 +190,7 @@ class AppTests(unittest.TestCase):
         ]
         app = self._run_page(_client_for([LEASE_HISTORY], history_rows=history))
         self.assertFalse(app.exception)
-        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertEqual(len(app.file_uploader), 1)
 
     def test_switching_to_empty_history_lease_keeps_uploader(self):
         history = [
@@ -211,9 +214,9 @@ class AppTests(unittest.TestCase):
         lease_box.set_value(empty_label)
         app.run()
         self.assertFalse(app.exception)
-        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertEqual(len(app.file_uploader), 1)
 
-    def test_route2_chain_rpc_failure_keeps_sidebar_uploader(self):
+    def test_route2_chain_rpc_failure_keeps_uploader(self):
         client = FakeSupabase(
             tables={
                 "leases": [LEASE_ROUTE2],
@@ -224,7 +227,7 @@ class AppTests(unittest.TestCase):
         )
         app = self._run_page(client)
         self.assertFalse(app.exception)
-        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertEqual(len(app.file_uploader), 1)
         self.assertTrue(any(box.label == "Choose a lease:" for box in app.selectbox))
 
     def test_route2_history_star_query_failure_keeps_uploader(self):
@@ -251,7 +254,7 @@ class AppTests(unittest.TestCase):
         )
         app = self._run_page(client)
         self.assertFalse(app.exception)
-        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertEqual(len(app.file_uploader), 1)
 
 
 if __name__ == "__main__":

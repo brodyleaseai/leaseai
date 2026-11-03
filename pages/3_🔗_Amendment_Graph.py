@@ -10,6 +10,7 @@ from datetime import datetime, date
 from supabase import create_client
 import config
 from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
+from amendment_report import build_amendment_resolution_model, generate_amendment_resolution_pdf
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -205,12 +206,8 @@ with st.sidebar:
     )
     
     selected_lease_id = lease_options[selected_lease_label]
+    selected_lease = next((lease for lease in leases if lease.get("id") == selected_lease_id), {})
     
-    st.markdown("---")
-    st.markdown("### 📤 Upload Addendum")
-    st.caption("Available for every lease, including ones that were just processed.")
-    render_amendment_upload(selected_lease_id, "sidebar")
-
     st.markdown("---")
     st.markdown("### 🔍 Query Date")
     query_date = st.date_input(
@@ -220,11 +217,12 @@ with st.sidebar:
     )
 
 # Main content
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Amendment Chain", 
-    "🔍 Clause History", 
+tab1, tab2, tab3, tab5, tab4 = st.tabs([
+    "📊 Amendment Chain",
+    "🔍 Clause History",
     "⚖️ Query Engine",
-    "📤 Upload Amendment"
+    "📄 Amendment Report",
+    "📤 Upload Amendment",
 ])
 
 # Upload tab first so a later chain/history crash cannot unmount the file picker.
@@ -492,6 +490,87 @@ with tab3:
         else:
             st.error(f"❌ No controlling value found for {query_clause} on {query_as_of}")
             st.info("This clause may not have been effective on that date, or no history is recorded.")
+
+# ============================================================================
+# TAB 5: Client Amendment Report
+# ============================================================================
+with tab5:
+    st.markdown("### 📄 Amendment Resolution Report")
+    st.markdown(
+        "Client-facing summary of how amendments changed the original lease, "
+        "and which language currently governs."
+    )
+    st.markdown("---")
+
+    try:
+        report_history = (
+            sb.table("lease_clause_history")
+            .select("*")
+            .eq("lease_id", selected_lease_id)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        report_history = []
+        st.error(f"Could not load clause history for the report: {e}")
+
+    try:
+        report_amendments = (
+            sb.rpc("get_amendment_chain", {"p_lease_id": selected_lease_id}).execute().data or []
+        )
+    except Exception as e:
+        report_amendments = []
+        st.error(f"Could not load amendment chain for the report: {e}")
+
+    report_model = build_amendment_resolution_model(
+        selected_lease,
+        report_amendments,
+        report_history,
+        as_of=query_date.isoformat(),
+    )
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Amendments", len(report_model["amendments"]))
+    c2.metric("Clauses now amended", len(report_model["changed_clauses"]))
+    c3.metric("Still original", len(report_model["unchanged_clauses"]))
+
+    if report_model["changed_clauses"]:
+        st.markdown("#### Current governing language vs original")
+        for clause in report_model["changed_clauses"]:
+            with st.expander(clause["clause_type"], expanded=True):
+                st.caption(
+                    f"Governed by {clause['governing_source']} v{clause['governing_version']} "
+                    f"({clause['modification_type']}), effective {clause['effective_from']}"
+                )
+                left, right = st.columns(2)
+                left.markdown("**Original lease**")
+                left.write(clause["original_value"])
+                right.markdown("**Current governing clause**")
+                right.write(clause["governing_value"])
+    else:
+        st.info("No clause has been superseded yet. The original lease language still governs.")
+
+    if report_model["unchanged_clauses"]:
+        with st.expander(
+            f"Clauses still governed by the original lease ({len(report_model['unchanged_clauses'])})",
+            expanded=False,
+        ):
+            for clause in report_model["unchanged_clauses"]:
+                st.markdown(f"**{clause['clause_type']}**")
+                st.write(clause["governing_value"])
+
+    try:
+        report_pdf = generate_amendment_resolution_pdf(report_model)
+        st.download_button(
+            "⬇️ Download client amendment report (PDF)",
+            data=report_pdf,
+            file_name="amendment-resolution-report.pdf",
+            mime="application/pdf",
+            key=f"amendment_report_pdf_{selected_lease_id}",
+        )
+    except Exception as e:
+        st.error(f"Could not build the amendment report PDF: {e}")
 
 # Footer
 st.markdown("---")
