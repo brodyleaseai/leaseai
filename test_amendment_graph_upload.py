@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from amendment_graph_helpers import clause_types_from_history, html_text
+from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
 
 
 PAGE_PATH = Path(__file__).parent / "pages" / "3_🔗_Amendment_Graph.py"
@@ -18,6 +18,11 @@ LEASE_HISTORY = {
     "id": "lease-history",
     "property_address": "200 Old Street",
     "tenant_name": "Established Tenant Inc",
+}
+LEASE_ROUTE2 = {
+    "id": "lease-route2",
+    "property_address": "Route 2",
+    "tenant_name": "Route 2 Tenant",
 }
 
 
@@ -45,19 +50,33 @@ class FakeQuery:
 
 
 class FakeSupabase:
-    def __init__(self, tables, rpcs=None):
+    def __init__(self, tables, rpcs=None, rpc_error=None, explode_history_star=False):
         self._tables = tables
         self._rpcs = rpcs or {}
+        self._rpc_error = rpc_error
+        self._explode_history_star = explode_history_star
 
     def table(self, name):
+        if name == "lease_clause_history" and self._explode_history_star:
+            return ExplodingStarQuery(self._tables.get(name, []))
         return FakeQuery(self._tables.get(name, []))
 
     def rpc(self, name, params):
+        if self._rpc_error:
+            raise RuntimeError(self._rpc_error)
         rows = list(self._rpcs.get(name, []))
         lease_id = params.get("p_lease_id")
         if lease_id:
             rows = [row for row in rows if row.get("lease_id") == lease_id]
         return FakeQuery(rows)
+
+
+class ExplodingStarQuery(FakeQuery):
+    def select(self, *args, **kwargs):
+        cols = args[0] if args else "*"
+        if cols == "*":
+            raise RuntimeError("Route 2 clause history payload failed")
+        return super().select(*args, **kwargs)
 
 
 def _client_for(leases, history_rows=None, amendments=None):
@@ -94,13 +113,23 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(clause_types_from_history(rows), ["Base Rent", "CAM Charges"])
         self.assertEqual(clause_types_from_history([]), [])
 
+    def test_lease_option_label_keeps_duplicates_distinct(self):
+        a = {"id": "aaa11111-1", "property_address": "Route 2", "tenant_name": "Same"}
+        b = {"id": "bbb22222-2", "property_address": "Route 2", "tenant_name": "Same"}
+        self.assertNotEqual(lease_option_label(a), lease_option_label(b))
+
 
 class PageSourceTests(unittest.TestCase):
     def test_query_engine_empty_state_does_not_stop_the_page(self):
         source = PAGE_PATH.read_text(encoding="utf-8")
-        tab3 = source.split("# TAB 3:")[1].split("# TAB 4:")[0]
-        self.assertNotIn("st.stop()", tab3)
-        self.assertIn("Upload Amendment", tab3)
+        self.assertEqual(source.count("st.stop()"), 1)
+        self.assertIn('render_amendment_upload(selected_lease_id, "sidebar")', source)
+        tab3_idx = source.find("# TAB 3:")
+        tab4_idx = source.find("# TAB 4:")
+        self.assertGreater(tab3_idx, 0)
+        self.assertGreater(tab4_idx, 0)
+        self.assertLess(tab4_idx, tab3_idx)
+        self.assertNotIn("st.stop()", source[tab3_idx:])
 
     def test_old_st_stop_pattern_hides_the_uploader(self):
         """Reproduce the previous Query Engine empty-state bug in isolation."""
@@ -177,10 +206,50 @@ class AppTests(unittest.TestCase):
         client = _client_for([LEASE_HISTORY, LEASE_EMPTY], history_rows=history)
         app = self._run_page(client)
         self.assertFalse(app.exception)
-        empty_label = f"{LEASE_EMPTY['property_address']} - {LEASE_EMPTY['tenant_name']}"
+        empty_label = lease_option_label(LEASE_EMPTY)
         lease_box = next(box for box in app.selectbox if box.label == "Choose a lease:")
         lease_box.set_value(empty_label)
         app.run()
+        self.assertFalse(app.exception)
+        self.assertGreaterEqual(len(app.file_uploader), 1)
+
+    def test_route2_chain_rpc_failure_keeps_sidebar_uploader(self):
+        client = FakeSupabase(
+            tables={
+                "leases": [LEASE_ROUTE2],
+                "lease_clause_history": [],
+                "amendment_clauses": [],
+            },
+            rpc_error="Route 2 amendment chain failed",
+        )
+        app = self._run_page(client)
+        self.assertFalse(app.exception)
+        self.assertGreaterEqual(len(app.file_uploader), 1)
+        self.assertTrue(any(box.label == "Choose a lease:" for box in app.selectbox))
+
+    def test_route2_history_star_query_failure_keeps_uploader(self):
+        history = [
+            {
+                "lease_id": "lease-route2",
+                "clause_type": "Base Rent",
+                "version_number": 0,
+                "is_current": True,
+                "effective_from": "2024-01-01",
+                "effective_to": None,
+                "source_document_type": "BASE_LEASE",
+                "modification_type": None,
+                "clause_value": "Year 1 rent",
+            }
+        ]
+        client = FakeSupabase(
+            tables={
+                "leases": [LEASE_ROUTE2],
+                "lease_clause_history": history,
+                "amendment_clauses": [],
+            },
+            explode_history_star=True,
+        )
+        app = self._run_page(client)
         self.assertFalse(app.exception)
         self.assertGreaterEqual(len(app.file_uploader), 1)
 

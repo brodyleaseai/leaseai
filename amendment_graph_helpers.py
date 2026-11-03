@@ -33,3 +33,12 @@ def clause_types_from_history(rows: Optional[Iterable[dict]]) -> List[str]:
         if item.get("clause_type")
     }
     return sorted(types)
+
+
+def lease_option_label(lease: dict) -> str:
+    """Stable unique selectbox label so two leases cannot collapse into one option."""
+    address = str(lease.get("property_address") or "Unknown property").strip()
+    tenant = str(lease.get("tenant_name") or "Unknown tenant").strip()
+    lease_id = str(lease.get("id") or "")
+    suffix = f" · {lease_id[:8]}" if lease_id else ""
+    return f"{address} — {tenant}{suffix}"

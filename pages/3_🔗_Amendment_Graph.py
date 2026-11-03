@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, date
 from supabase import create_client
 import config
-from amendment_graph_helpers import clause_types_from_history, html_text
+from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -109,21 +109,95 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+
+def process_amendment_upload(uploaded_file, lease_id: str) -> None:
+    """Extract and store one amendment PDF against the selected lease."""
+    import os
+    import tempfile
+
+    with st.spinner("Processing amendment with OCR and AI extraction..."):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+        try:
+            from amendment_processor_v2 import AmendmentProcessorV2
+
+            processor = AmendmentProcessorV2()
+            amendment_id, extracted_fields = processor.process_amendment(
+                pdf_path=tmp_path,
+                lease_id=lease_id,
+                supabase_client=sb,
+                filename=uploaded_file.name,
+            )
+            st.success("✅ Amendment processed successfully!")
+            st.success(f"Amendment ID: {amendment_id}")
+            st.markdown("### 📊 Extraction Results")
+            st.json(extracted_fields)
+            st.info("💡 Go to the **Amendment Chain** tab to see the updated amendment chain!")
+        except Exception as e:
+            st.error(f"❌ Error processing amendment: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+        finally:
+            os.unlink(tmp_path)
+
+
+def render_amendment_upload(lease_id: str, key_prefix: str) -> None:
+    """File picker for an addendum. Created before chain/history tabs so those cannot hide it."""
+    uploaded_file = st.file_uploader(
+        "Upload Amendment PDF",
+        type=["pdf"],
+        help="Upload the amendment or addendum document (PDF format)",
+        key=f"{key_prefix}_amendment_pdf_{lease_id}",
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.number_input(
+            "Amendment Number",
+            min_value=1,
+            value=1,
+            help="1st Amendment, 2nd Amendment, etc.",
+            key=f"{key_prefix}_amendment_number_{lease_id}",
+        )
+    with col2:
+        st.date_input(
+            "Amendment Date",
+            value=date.today(),
+            help="Date the amendment was signed",
+            key=f"{key_prefix}_amendment_date_{lease_id}",
+        )
+    if st.button(
+        "🚀 Process Amendment",
+        type="primary",
+        disabled=(uploaded_file is None),
+        key=f"{key_prefix}_process_amendment_{lease_id}",
+    ):
+        if uploaded_file:
+            process_amendment_upload(uploaded_file, lease_id)
+
+
 # Sidebar - Lease Selection
 with st.sidebar:
     st.markdown("### 📋 Select Lease")
     
     # Get all leases with amendments
-    leases_response = sb.table("leases").select("id, property_address, tenant_name").execute()
-    leases = leases_response.data or []
+    try:
+        leases_response = sb.table("leases").select(
+            "id, property_address, tenant_name, filename"
+        ).execute()
+        leases = leases_response.data or []
+    except Exception:
+        leases_response = sb.table("leases").select(
+            "id, property_address, tenant_name"
+        ).execute()
+        leases = leases_response.data or []
     
     if not leases:
         st.warning("No leases found. Upload a lease first.")
         st.stop()
     
-    # Lease selector
-    lease_options = {f"{lease['property_address']} - {lease['tenant_name']}": lease['id'] 
-                     for lease in leases}
+    # Lease selector — unique labels so two similar addresses cannot collapse.
+    lease_options = {lease_option_label(lease): lease["id"] for lease in leases}
     
     selected_lease_label = st.selectbox(
         "Choose a lease:",
@@ -132,6 +206,11 @@ with st.sidebar:
     
     selected_lease_id = lease_options[selected_lease_label]
     
+    st.markdown("---")
+    st.markdown("### 📤 Upload Addendum")
+    st.caption("Available for every lease, including ones that were just processed.")
+    render_amendment_upload(selected_lease_id, "sidebar")
+
     st.markdown("---")
     st.markdown("### 🔍 Query Date")
     query_date = st.date_input(
@@ -147,6 +226,16 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "⚖️ Query Engine",
     "📤 Upload Amendment"
 ])
+
+# Upload tab first so a later chain/history crash cannot unmount the file picker.
+# ============================================================================
+# TAB 4: Upload Amendment
+# ============================================================================
+with tab4:
+    st.markdown("### 📤 Upload Amendment")
+    st.markdown("Upload a lease amendment or addendum to add it to the amendment chain.")
+    st.markdown("---")
+    render_amendment_upload(selected_lease_id, "tab")
 
 # ============================================================================
 # TAB 1: Amendment Chain View
@@ -170,11 +259,16 @@ with tab1:
         
         # Display amendment chain
         for i, amendment in enumerate(amendments):
-            with st.expander(
-                f"**Amendment #{amendment['amendment_number']}** • {amendment['amendment_date']} • "
-                f"{len(amendment['modified_clauses'] or [])} clause(s) modified",
-                expanded=(i == 0)
-            ):
+            try:
+                clause_count = len(amendment.get("modified_clauses") or [])
+                expander_label = (
+                    f"**Amendment #{html_text(amendment.get('amendment_number'))}** • "
+                    f"{html_text(amendment.get('amendment_date'))} • "
+                    f"{clause_count} clause(s) modified"
+                )
+            except Exception:
+                expander_label = f"Amendment {i + 1}"
+            with st.expander(expander_label, expanded=(i == 0)):
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -203,11 +297,14 @@ with tab1:
                     st.info("No clause modifications recorded")
                 
                 # Get detailed clause modifications
-                clauses_response = sb.table("amendment_clauses").select("*").eq(
-                    "amendment_id", amendment['amendment_id']
-                ).execute()
-                
-                clauses = clauses_response.data or []
+                try:
+                    clauses_response = sb.table("amendment_clauses").select("*").eq(
+                        "amendment_id", amendment.get("amendment_id")
+                    ).execute()
+                    clauses = clauses_response.data or []
+                except Exception as clause_error:
+                    clauses = []
+                    st.error(f"Could not load clause details: {clause_error}")
                 
                 if clauses:
                     st.markdown("---")
@@ -265,15 +362,19 @@ with tab2:
         # Clause selector
         selected_clause = st.selectbox(
             "Select clause to view history:",
-            options=sorted(clause_types)
+            options=sorted(clause_types),
+            key=f"history_clause_{selected_lease_id}",
         )
         
         # Get full history for this clause
-        clause_history = sb.table("lease_clause_history").select("*").eq(
-            "lease_id", selected_lease_id
-        ).eq("clause_type", selected_clause).order("version_number").execute()
-        
-        versions = clause_history.data or []
+        try:
+            clause_history = sb.table("lease_clause_history").select("*").eq(
+                "lease_id", selected_lease_id
+            ).eq("clause_type", selected_clause).order("version_number").execute()
+            versions = clause_history.data or []
+        except Exception as e:
+            versions = []
+            st.error(f"Could not load clause versions: {e}")
         
         st.markdown(f"### Timeline: {selected_clause}")
         st.markdown(f"**{len(versions)} version(s)** recorded")
@@ -282,7 +383,7 @@ with tab2:
         st.markdown('<div class="clause-timeline">', unsafe_allow_html=True)
         
         for version in versions:
-            is_current = version['is_current']
+            is_current = version.get("is_current")
             badge_html = '<span class="current-badge">CURRENT</span>' if is_current else '<span class="superseded-badge">SUPERSEDED</span>'
             
             effective_to = (
@@ -391,86 +492,6 @@ with tab3:
         else:
             st.error(f"❌ No controlling value found for {query_clause} on {query_as_of}")
             st.info("This clause may not have been effective on that date, or no history is recorded.")
-
-# ============================================================================
-# TAB 4: Upload Amendment
-# ============================================================================
-with tab4:
-    st.markdown("### 📤 Upload Amendment")
-    st.markdown("Upload a lease amendment to add it to the amendment chain and update clause history.")
-    
-    st.markdown("---")
-    
-    uploaded_file = st.file_uploader(
-        "Upload Amendment PDF",
-        type=['pdf'],
-        help="Upload the amendment document (PDF format)",
-        key=f"amendment_pdf_{selected_lease_id}",
-    )
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        amendment_number = st.number_input(
-            "Amendment Number",
-            min_value=1,
-            value=1,
-            help="1st Amendment, 2nd Amendment, etc.",
-            key=f"amendment_number_{selected_lease_id}",
-        )
-    
-    with col2:
-        amendment_date = st.date_input(
-            "Amendment Date",
-            value=date.today(),
-            help="Date the amendment was signed",
-            key=f"amendment_date_{selected_lease_id}",
-        )
-    
-    if st.button(
-        "🚀 Process Amendment",
-        type="primary",
-        disabled=(uploaded_file is None),
-        key=f"process_amendment_{selected_lease_id}",
-    ):
-        if uploaded_file:
-            with st.spinner("Processing amendment with OCR and AI extraction..."):
-                # Save uploaded file temporarily
-                import tempfile
-                import os
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                try:
-                    # Process amendment with enhanced v2 processor
-                    from amendment_processor_v2 import AmendmentProcessorV2
-                    
-                    processor = AmendmentProcessorV2()
-                    amendment_id, extracted_fields = processor.process_amendment(
-                        pdf_path=tmp_path,
-                        lease_id=selected_lease_id,
-                        supabase_client=sb,
-                        filename=uploaded_file.name
-                    )
-                    
-                    st.success(f"✅ Amendment processed successfully!")
-                    st.success(f"Amendment ID: {amendment_id}")
-                    
-                    st.markdown("### 📊 Extraction Results")
-                    st.json(extracted_fields)
-                    
-                    st.info("💡 Go to the **Amendment Chain** tab to see the updated amendment chain!")
-                    
-                except Exception as e:
-                    st.error(f"❌ Error processing amendment: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-                
-                finally:
-                    # Clean up temp file
-                    os.unlink(tmp_path)
 
 # Footer
 st.markdown("---")
