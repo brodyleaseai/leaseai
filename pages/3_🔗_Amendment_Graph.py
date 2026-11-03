@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, date
 from supabase import create_client
 import config
+from amendment_graph_helpers import clause_types_from_history, html_text
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -154,9 +155,13 @@ with tab1:
     st.markdown("### 📊 Amendment Chain")
     st.markdown("Complete history of amendments for this lease, in chronological order.")
     
-    # Get amendment chain
-    chain_response = sb.rpc("get_amendment_chain", {"p_lease_id": selected_lease_id}).execute()
-    amendments = chain_response.data or []
+    # Get amendment chain. Never let a lease-specific RPC error hide the upload tab.
+    try:
+        chain_response = sb.rpc("get_amendment_chain", {"p_lease_id": selected_lease_id}).execute()
+        amendments = chain_response.data or []
+    except Exception as e:
+        amendments = []
+        st.error(f"Could not load amendment chain: {e}")
     
     if not amendments:
         st.info("📝 No amendments found for this lease. Upload an amendment to get started.")
@@ -209,24 +214,29 @@ with tab1:
                     st.markdown("**🔄 Detailed Changes:**")
                     
                     for clause in clauses:
+                        section_html = (
+                            f"<p><strong>Section:</strong> {html_text(clause['clause_section'])}</p>"
+                            if clause.get("clause_section")
+                            else ""
+                        )
                         st.markdown(f"""
                         <div class="amendment-card">
-                            <h4>{clause['clause_type']}</h4>
-                            <span class="version-badge">{clause['modification_type']}</span>
+                            <h4>{html_text(clause.get('clause_type'))}</h4>
+                            <span class="version-badge">{html_text(clause.get('modification_type'))}</span>
                             
                             <div class="value-comparison">
                                 <div class="value-box value-original">
                                     <strong style="color: #ef4444;">Before:</strong><br>
-                                    {clause['original_value'] or 'N/A'}
+                                    {html_text(clause.get('original_value'))}
                                 </div>
                                 <div class="value-box value-new">
                                     <strong style="color: #10b981;">After:</strong><br>
-                                    {clause['new_value']}
+                                    {html_text(clause.get('new_value'))}
                                 </div>
                             </div>
                             
-                            {f"<p><strong>Section:</strong> {clause['clause_section']}</p>" if clause['clause_section'] else ""}
-                            <p><strong>Confidence:</strong> {clause['confidence']}</p>
+                            {section_html}
+                            <p><strong>Confidence:</strong> {html_text(clause.get('confidence'))}</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -238,14 +248,19 @@ with tab2:
     st.markdown("Track how specific clauses evolved through amendments over time.")
     
     # Get all clause types for this lease
-    history_response = sb.table("lease_clause_history").select(
-        "clause_type"
-    ).eq("lease_id", selected_lease_id).execute()
-    
-    clause_types = list(set([item['clause_type'] for item in (history_response.data or [])]))
+    try:
+        history_response = sb.table("lease_clause_history").select(
+            "clause_type"
+        ).eq("lease_id", selected_lease_id).execute()
+        history_rows = history_response.data or []
+    except Exception as e:
+        history_rows = []
+        st.error(f"Could not load clause history: {e}")
+
+    clause_types = clause_types_from_history(history_rows)
     
     if not clause_types:
-        st.info("📝 No clause history available yet. Upload amendments to track clause evolution.")
+        st.info("📝 No clause history available yet. Upload an amendment to start tracking clause evolution.")
     else:
         # Clause selector
         selected_clause = st.selectbox(
@@ -270,16 +285,21 @@ with tab2:
             is_current = version['is_current']
             badge_html = '<span class="current-badge">CURRENT</span>' if is_current else '<span class="superseded-badge">SUPERSEDED</span>'
             
+            effective_to = (
+                f"to {html_text(version['effective_to'])}"
+                if version.get("effective_to")
+                else "onwards"
+            )
             st.markdown(f"""
             <div class="timeline-item">
                 <div class="timeline-dot"></div>
-                <h4>Version {version['version_number']} {badge_html}</h4>
-                <p><strong>Effective:</strong> {version['effective_from']} {f"to {version['effective_to']}" if version['effective_to'] else "onwards"}</p>
-                <p><strong>Source:</strong> {version['source_document_type']}</p>
-                <p><strong>Modification:</strong> {version['modification_type'] or 'Original'}</p>
+                <h4>Version {html_text(version.get('version_number'))} {badge_html}</h4>
+                <p><strong>Effective:</strong> {html_text(version.get('effective_from'))} {effective_to}</p>
+                <p><strong>Source:</strong> {html_text(version.get('source_document_type'))}</p>
+                <p><strong>Modification:</strong> {html_text(version.get('modification_type') or 'Original')}</p>
                 <div style="background: #0f1117; padding: 1rem; border-radius: 8px; margin-top: 0.5rem;">
                     <strong>Value:</strong><br>
-                    {version['clause_value']}
+                    {html_text(version.get('clause_value'))}
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -296,32 +316,43 @@ with tab3:
     st.markdown("---")
     
     col1, col2 = st.columns(2)
-    
-    with col1:
-        # Get available clause types
+
+    try:
         history_response = sb.table("lease_clause_history").select(
             "clause_type"
         ).eq("lease_id", selected_lease_id).execute()
-        
-        clause_types = sorted(list(set([item['clause_type'] for item in (history_response.data or [])])))
-        
-        if not clause_types:
-            st.warning("No clause history available. Upload amendments first.")
-            st.stop()
-        
-        query_clause = st.selectbox(
-            "Select clause to query:",
-            options=clause_types
-        )
+        query_clause_types = clause_types_from_history(history_response.data)
+    except Exception as e:
+        query_clause_types = []
+        st.error(f"Could not load clause history: {e}")
+    
+    with col1:
+        if not query_clause_types:
+            st.warning(
+                "No clause history for this lease yet. You can still upload an "
+                "amendment in the **Upload Amendment** tab — clause history is not required first."
+            )
+            query_clause = None
+        else:
+            query_clause = st.selectbox(
+                "Select clause to query:",
+                options=query_clause_types,
+                key=f"query_clause_{selected_lease_id}",
+            )
     
     with col2:
         query_as_of = st.date_input(
             "As of date:",
             value=query_date,
-            help="Find the controlling value of this clause on this specific date"
+            help="Find the controlling value of this clause on this specific date",
+            key=f"query_as_of_{selected_lease_id}",
         )
     
-    if st.button("🔍 Query Controlling Value", type="primary"):
+    if query_clause and st.button(
+        "🔍 Query Controlling Value",
+        type="primary",
+        key=f"query_btn_{selected_lease_id}",
+    ):
         # Execute query
         result = sb.rpc("get_controlling_clause", {
             "p_lease_id": selected_lease_id,
@@ -336,14 +367,14 @@ with tab3:
             
             st.markdown(f"""
             <div class="amendment-card">
-                <h3>{query_clause}</h3>
-                <p><strong>Version:</strong> {controlling['version_number']}</p>
-                <p><strong>Source:</strong> {controlling['source_type']}</p>
+                <h3>{html_text(query_clause)}</h3>
+                <p><strong>Version:</strong> {html_text(controlling.get('version_number'))}</p>
+                <p><strong>Source:</strong> {html_text(controlling.get('source_type'))}</p>
                 
                 <div style="background: #10b981; background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
                             padding: 1.5rem; border-radius: 8px; margin-top: 1rem; color: white;">
                     <h4 style="margin: 0; color: white;">Controlling Value:</h4>
-                    <p style="font-size: 1.1rem; margin-top: 0.5rem; color: white;">{controlling['clause_value']}</p>
+                    <p style="font-size: 1.1rem; margin-top: 0.5rem; color: white;">{html_text(controlling.get('clause_value'))}</p>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -373,7 +404,8 @@ with tab4:
     uploaded_file = st.file_uploader(
         "Upload Amendment PDF",
         type=['pdf'],
-        help="Upload the amendment document (PDF format)"
+        help="Upload the amendment document (PDF format)",
+        key=f"amendment_pdf_{selected_lease_id}",
     )
     
     col1, col2 = st.columns(2)
@@ -383,17 +415,24 @@ with tab4:
             "Amendment Number",
             min_value=1,
             value=1,
-            help="1st Amendment, 2nd Amendment, etc."
+            help="1st Amendment, 2nd Amendment, etc.",
+            key=f"amendment_number_{selected_lease_id}",
         )
     
     with col2:
         amendment_date = st.date_input(
             "Amendment Date",
             value=date.today(),
-            help="Date the amendment was signed"
+            help="Date the amendment was signed",
+            key=f"amendment_date_{selected_lease_id}",
         )
     
-    if st.button("🚀 Process Amendment", type="primary", disabled=(uploaded_file is None)):
+    if st.button(
+        "🚀 Process Amendment",
+        type="primary",
+        disabled=(uploaded_file is None),
+        key=f"process_amendment_{selected_lease_id}",
+    ):
         if uploaded_file:
             with st.spinner("Processing amendment with OCR and AI extraction..."):
                 # Save uploaded file temporarily
