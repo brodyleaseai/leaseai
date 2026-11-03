@@ -3,7 +3,11 @@
 import unittest
 from io import BytesIO
 
-from amendment_report import build_amendment_resolution_model, generate_amendment_resolution_pdf
+from amendment_report import (
+    abstract_filename,
+    build_amendment_resolution_model,
+    generate_amendment_resolution_pdf,
+)
 
 
 LEASE = {
@@ -63,12 +67,31 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(rent["original_value"], "$8,550.08 per month")
         self.assertEqual(rent["governing_value"], "$9,000.00 per month")
         self.assertEqual(rent["governing_source"], "AMENDMENT")
+        value = model["value"]
+        self.assertEqual(value["deliverable_name"], "Amendment Resolution Abstract")
+        self.assertEqual(value["amendments_resolved"], 1)
+        self.assertEqual(value["clauses_superseded"], 1)
+        self.assertEqual(value["clauses_still_original"], 1)
+        self.assertEqual(value["clauses_tracked"], 2)
+        self.assertEqual(value["prepared_for"], "Route 2 Tenant LLC")
+        self.assertIn("controlling lease language", value["statement"])
+
+    def test_prepared_for_override_and_filename(self):
+        model = build_amendment_resolution_model(
+            LEASE, AMENDMENTS, HISTORY, as_of="2026-11-03", prepared_for="Northland Capital"
+        )
+        self.assertEqual(model["value"]["prepared_for"], "Northland Capital")
+        self.assertEqual(
+            abstract_filename(model),
+            "Amendment-Resolution-Abstract-Northland-Capital-2026-11-03.pdf",
+        )
 
     def test_empty_history_is_safe(self):
         model = build_amendment_resolution_model(LEASE, [], [])
         self.assertEqual(model["changed_clauses"], [])
         self.assertEqual(model["unchanged_clauses"], [])
         self.assertEqual(model["amendments"], [])
+        self.assertEqual(model["value"]["amendments_resolved"], 0)
 
 
 class PdfTests(unittest.TestCase):
@@ -85,12 +108,16 @@ class PdfTests(unittest.TestCase):
 
         reader = PdfReader(BytesIO(pdf_bytes))
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        self.assertIn("Amendment Resolution Report", text)
+        self.assertIn("Amendment Resolution Abstract", text)
+        self.assertIn("controlling lease language", text)
         self.assertIn("Route 2 Retail Center", text)
         self.assertIn("$8,550.08", text)
         self.assertIn("$9,000.00", text)
         self.assertIn("Permitted Use", text)
+        self.assertIn("Schedule A", text)
+        self.assertIn("Exhibit A", text)
         self.assertIn("still governed by the original lease", text.lower())
+        self.assertIn("not a legal opinion", text.lower())
 
 
 if __name__ == "__main__":

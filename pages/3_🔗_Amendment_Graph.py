@@ -10,7 +10,11 @@ from datetime import datetime, date
 from supabase import create_client
 import config
 from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
-from amendment_report import build_amendment_resolution_model, generate_amendment_resolution_pdf
+from amendment_report import (
+    abstract_filename,
+    build_amendment_resolution_model,
+    generate_amendment_resolution_pdf,
+)
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -221,7 +225,7 @@ tab1, tab2, tab3, tab5, tab4 = st.tabs([
     "📊 Amendment Chain",
     "🔍 Clause History",
     "⚖️ Query Engine",
-    "📄 Amendment Report",
+    "📄 Resolution Abstract",
     "📤 Upload Amendment",
 ])
 
@@ -495,12 +499,21 @@ with tab3:
 # TAB 5: Client Amendment Report
 # ============================================================================
 with tab5:
-    st.markdown("### 📄 Amendment Resolution Report")
+    st.markdown("### 📄 Amendment Resolution Abstract")
     st.markdown(
-        "Client-facing summary of how amendments changed the original lease, "
-        "and which language currently governs."
+        "The value of Amendment Resolution Graph™ is **controlling-language certainty**: "
+        "what governs as of a stated date, after every amendment is applied, and what "
+        "original language it replaced. This is the exhibit the client files with "
+        "estoppels, lender packages, billing, and audit workpapers."
     )
     st.markdown("---")
+
+    prepared_for = st.text_input(
+        "Prepared for (client / customer)",
+        value=selected_lease.get("tenant_name") or "",
+        help="Name printed on the abstract cover.",
+        key=f"abstract_prepared_for_{selected_lease_id}",
+    )
 
     try:
         report_history = (
@@ -528,15 +541,19 @@ with tab5:
         report_amendments,
         report_history,
         as_of=query_date.isoformat(),
+        prepared_for=prepared_for,
     )
+    value = report_model["value"]
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Amendments", len(report_model["amendments"]))
-    c2.metric("Clauses now amended", len(report_model["changed_clauses"]))
-    c3.metric("Still original", len(report_model["unchanged_clauses"]))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Amendments resolved", value["amendments_resolved"])
+    c2.metric("Clauses superseded", value["clauses_superseded"])
+    c3.metric("Still original", value["clauses_still_original"])
+    c4.metric("Clauses tracked", value["clauses_tracked"])
+    st.caption(f"Controlling as of {value['as_of']} · Prepared for {value['prepared_for']}")
 
     if report_model["changed_clauses"]:
-        st.markdown("#### Current governing language vs original")
+        st.markdown("#### Schedule A — Controlling language vs original")
         for clause in report_model["changed_clauses"]:
             with st.expander(clause["clause_type"], expanded=True):
                 st.caption(
@@ -553,7 +570,7 @@ with tab5:
 
     if report_model["unchanged_clauses"]:
         with st.expander(
-            f"Clauses still governed by the original lease ({len(report_model['unchanged_clauses'])})",
+            f"Schedule B — Still governed by the original lease ({len(report_model['unchanged_clauses'])})",
             expanded=False,
         ):
             for clause in report_model["unchanged_clauses"]:
@@ -563,9 +580,9 @@ with tab5:
     try:
         report_pdf = generate_amendment_resolution_pdf(report_model)
         st.download_button(
-            "⬇️ Download client amendment report (PDF)",
+            "⬇️ Download Amendment Resolution Abstract (PDF)",
             data=report_pdf,
-            file_name="amendment-resolution-report.pdf",
+            file_name=abstract_filename(report_model),
             mime="application/pdf",
             key=f"amendment_report_pdf_{selected_lease_id}",
         )

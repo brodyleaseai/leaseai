@@ -170,7 +170,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.file_uploader), 1)
         self.assertEqual(app.file_uploader[0].label, "Upload Amendment PDF")
-        self.assertTrue(any("Amendment Report" in tab.label for tab in app.tabs))
+        self.assertTrue(any("Resolution Abstract" in tab.label for tab in app.tabs))
         self.assertGreaterEqual(len(app.download_button), 1)
 
     def test_history_with_braces_does_not_kill_uploader(self):
