@@ -48,9 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_asc842_lease_id ON asc842_calculations(lease_id);
 CREATE INDEX IF NOT EXISTS idx_asc842_calculation_date ON asc842_calculations(calculation_date);
 CREATE INDEX IF NOT EXISTS idx_asc842_classification ON asc842_calculations(lease_classification);
 
--- Grant permissions to all roles
-GRANT ALL ON asc842_calculations TO anon, authenticated, service_role;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+-- Grant permissions to backend roles only (not anon)
+GRANT ALL ON asc842_calculations TO authenticated, service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
 
 -- Add helpful comment
 COMMENT ON TABLE asc842_calculations IS 'ASC 842 / IFRS 16 lease accounting compliance calculations';
