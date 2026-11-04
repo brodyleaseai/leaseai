@@ -34,6 +34,121 @@ from supabase import create_client
 from auth_module import AuthManager
 from asc842_engine import ASC842ComplianceEngine
 from asc842_params import fields_from_rows, params_from_extracted_fields, source_labels, widget_key
+from asc842_report import build_asc842_report_package, journal_entry_rows
+
+
+def _calculation_label(calc: dict) -> str:
+    lease_info = calc.get("leases") or {}
+    property_addr = (
+        lease_info.get("property_address")
+        or lease_info.get("filename")
+        or calc.get("property_address")
+        or "Unknown property"
+    )
+    tenant = lease_info.get("tenant_name") or calc.get("tenant_name") or ""
+    when = str(calc.get("calculation_date") or calc.get("created_at") or "")[:10]
+    suffix = f" — {tenant}" if tenant else ""
+    return f"{property_addr}{suffix} — {when}"
+
+
+def _load_saved_calculations():
+    selects = (
+        "*, leases(filename, property_address, tenant_name, client_id)",
+        "*",
+    )
+    order_cols = ("calculation_date", "calculated_at", "created_at")
+    last_error = None
+    for columns in selects:
+        for order_col in order_cols:
+            try:
+                return (
+                    sb.table("asc842_calculations")
+                    .select(columns)
+                    .order(order_col, desc=True)
+                    .limit(50)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception as error:
+                last_error = error
+    if last_error:
+        raise last_error
+    return []
+
+
+def _package_for_calculation(calc: dict, prepared_for: str = ""):
+    lease_info = calc.get("leases") or {}
+    lease = {
+        "id": calc.get("lease_id"),
+        "property_address": lease_info.get("property_address") or calc.get("property_address"),
+        "tenant_name": lease_info.get("tenant_name") or calc.get("tenant_name"),
+        "filename": lease_info.get("filename"),
+    }
+    return build_asc842_report_package(
+        lease,
+        calc=calc,
+        prepared_for=prepared_for or lease.get("tenant_name"),
+    )
+
+
+def _render_report_downloads(package: dict, key_prefix: str):
+    model = package.get("model") or {}
+    st.download_button(
+        "⬇️ Download ASC 842 / IFRS 16 Compliance Report (PDF)",
+        data=package["pdf_bytes"],
+        file_name=package["filename"],
+        mime="application/pdf",
+        key=f"{key_prefix}_pdf",
+        use_container_width=True,
+    )
+    col_a, col_b = st.columns(2)
+    if package.get("liability_csv"):
+        col_a.download_button(
+            "📥 Liability schedule (CSV)",
+            data=package["liability_csv"],
+            file_name=package["filename"].replace(".pdf", "-liability.csv"),
+            mime="text/csv",
+            key=f"{key_prefix}_liab",
+            use_container_width=True,
+        )
+    if package.get("rou_csv"):
+        col_b.download_button(
+            "📥 ROU schedule (CSV)",
+            data=package["rou_csv"],
+            file_name=package["filename"].replace(".pdf", "-rou.csv"),
+            mime="text/csv",
+            key=f"{key_prefix}_rou",
+            use_container_width=True,
+        )
+
+    recipient = st.text_input(
+        "Client email",
+        value="",
+        placeholder="client@company.com",
+        key=f"{key_prefix}_email",
+    )
+    if st.button("📧 Email compliance report", key=f"{key_prefix}_send"):
+        try:
+            from email_delivery import send_asc842_report_email
+
+            sent = send_asc842_report_email(
+                recipient_email=recipient.strip(),
+                recipient_name=model.get("prepared_for") or model.get("tenant_name") or "Client",
+                property_address=model.get("property_address") or "N/A",
+                tenant_name=model.get("tenant_name") or "N/A",
+                pdf_bytes=package["pdf_bytes"],
+                filename=package["filename"],
+                classification=model.get("classification") or "N/A",
+                rou_asset=model.get("initial_rou_asset") or 0,
+                liability=model.get("initial_liability") or 0,
+            )
+            if sent:
+                st.success(f"Report emailed to {recipient.strip()}")
+            else:
+                st.error("Could not send the email. Check the address and that SendGrid is configured.")
+        except Exception as email_error:
+            st.error(f"Could not send the email: {email_error}")
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 auth = AuthManager(sb)
@@ -76,6 +191,7 @@ with tab1:
         
         selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()), key="asc842_selected_lease")
         selected_lease_id = lease_options[selected_lease_label]
+        selected_lease = next((item for item in leases if item.get("id") == selected_lease_id), {})
         
         try:
             fields_response = sb.table("extracted_fields").select("*").eq("lease_id", selected_lease_id).execute()
@@ -413,16 +529,30 @@ with tab1:
                             with st.expander(f"Entry {i}: {entry.get('description', 'Journal Entry')} - {entry.get('date', 'N/A')}"):
                                 st.markdown(f"**Date:** {entry.get('date', 'N/A')}")
                                 st.markdown(f"**Description:** {entry.get('description', 'N/A')}")
-                                st.markdown("**Debits:**")
-                                for debit in entry.get('debits', []):
-                                    st.markdown(f"- {debit['account']}: ${debit['amount']:,.2f}")
-                                st.markdown("**Credits:**")
-                                for credit in entry.get('credits', []):
-                                    st.markdown(f"- {credit['account']}: ${credit['amount']:,.2f}")
+                                lines = journal_entry_rows(entry)
+                                if lines:
+                                    for line in lines:
+                                        if line["debit"]:
+                                            st.markdown(f"- Debit {line['account']}: ${line['debit']:,.2f}")
+                                        if line["credit"]:
+                                            st.markdown(f"- Credit {line['account']}: ${line['credit']:,.2f}")
+                                else:
+                                    st.info("No journal lines on this entry.")
                         
-                        st.info(f"Showing 5 of {len(engine.journal_entries)} journal entries. Download full report for all entries.")
+                        st.info(f"Showing 5 of {len(engine.journal_entries)} journal entries. Download the compliance report for the full set.")
                     else:
                         st.info("No journal entries generated")
+
+                    try:
+                        live_package = build_asc842_report_package(
+                            selected_lease,
+                            lease_inputs=lease_data,
+                            prepared_for=selected_lease.get("tenant_name"),
+                        )
+                        st.session_state["asc842_live_package"] = live_package
+                        st.session_state["asc842_live_lease"] = selected_lease_id
+                    except Exception as report_error:
+                        st.warning(f"Calculation finished, but the PDF report could not be built: {report_error}")
                     
                     # Save to database (optional)
                     try:
@@ -434,13 +564,30 @@ with tab1:
                             "initial_liability": float(engine.initial_liability),
                             "lease_term_months": int(engine.lease_term_months),
                             "discount_rate": float(discount_rate),
-                            "calculation_data": json.dumps(lease_data)
+                            "calculation_data": json.dumps(lease_data),
+                            "liability_schedule": results.get("liability_schedule"),
+                            "rou_schedule": results.get("rou_asset_schedule"),
+                            "journal_entries": engine.journal_entries,
                         }
                         
                         sb.table("asc842_calculations").insert(calculation_record).execute()
                         st.success("✅ Calculation saved to database")
                     except Exception as db_error:
-                        st.info(f"Note: Could not save to database (table may not exist): {str(db_error)}")
+                        try:
+                            slim_record = {
+                                "lease_id": selected_lease_id,
+                                "calculation_date": datetime.now().isoformat(),
+                                "lease_classification": engine.lease_classification,
+                                "initial_rou_asset": float(engine.initial_rou_asset),
+                                "initial_liability": float(engine.initial_liability),
+                                "lease_term_months": int(engine.lease_term_months),
+                                "discount_rate": float(discount_rate),
+                                "calculation_data": json.dumps(lease_data),
+                            }
+                            sb.table("asc842_calculations").insert(slim_record).execute()
+                            st.success("✅ Calculation saved to database")
+                        except Exception:
+                            st.info(f"Note: Could not save to database (table may not exist): {str(db_error)}")
                 
                 except Exception as e:
                     st.error(f"❌ **Calculation Error**")
@@ -462,21 +609,23 @@ with tab1:
                            "- Verify payment amounts are positive numbers\n"
                            "- Discount rate should be between 0% and 20%")
 
+        if (
+            st.session_state.get("asc842_live_lease") == selected_lease_id
+            and st.session_state.get("asc842_live_package")
+        ):
+            st.markdown("### 📄 Compliance report")
+            _render_report_downloads(st.session_state["asc842_live_package"], f"live_{selected_lease_id}")
+
 
 with tab2:
     st.subheader("📊 View Past Calculations")
     
     try:
-        calculations_response = sb.table("asc842_calculations").select("*, leases(filename, property_address)").order("calculation_date", desc=True).limit(20).execute()
-        calculations = calculations_response.data or []
+        calculations = _load_saved_calculations()
         
         if calculations:
             for calc in calculations:
-                lease_info = calc.get('leases', {})
-                property_addr = lease_info.get('property_address', lease_info.get('filename', 'Unknown'))
-                calc_date = calc.get('calculation_date', '')[:10]
-                
-                with st.expander(f"{property_addr} - {calc_date}"):
+                with st.expander(_calculation_label(calc)):
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
@@ -488,8 +637,15 @@ with tab2:
                     with col4:
                         st.metric("Term", f"{calc.get('lease_term_months', 0)} mo")
                     
-                    if st.button(f"View Full Report", key=f"report_{calc['id']}"):
-                        st.info("Full report viewing feature coming soon!")
+                    if st.button("View Full Report", key=f"report_{calc['id']}"):
+                        try:
+                            package = _package_for_calculation(calc)
+                            st.session_state[f"asc842_view_{calc['id']}"] = package
+                        except Exception as report_error:
+                            st.error(f"Could not build the report: {report_error}")
+                    stored = st.session_state.get(f"asc842_view_{calc['id']}")
+                    if stored:
+                        _render_report_downloads(stored, f"view_{calc['id']}")
         else:
             st.info("No calculations found. Create one in the 'New Calculation' tab.")
     except Exception as e:
@@ -537,44 +693,102 @@ with tab3:
     - ROU assets by major class
     - Lease liabilities (current and non-current)
     
-    💡 **Generate these automatically** by running a calculation and downloading the full compliance report.
+    💡 **These notes are generated from a saved calculation below, and they are included in the PDF compliance report.**
     """)
+
+    try:
+        disclosure_calcs = _load_saved_calculations()
+    except Exception:
+        disclosure_calcs = []
+    if not disclosure_calcs:
+        st.info("Run a calculation first, then return here for the disclosure package.")
+    else:
+        disclosure_options = {_calculation_label(calc): calc for calc in disclosure_calcs}
+        selected_disclosure_label = st.selectbox(
+            "Select a saved calculation",
+            list(disclosure_options.keys()),
+            key="asc842_disclosure_calc",
+        )
+        selected_disclosure = disclosure_options[selected_disclosure_label]
+        try:
+            disclosure_package = _package_for_calculation(selected_disclosure)
+            disclosures = (disclosure_package["model"].get("disclosures") or {})
+            initial = disclosures.get("initial_measurement") or {}
+            expense = disclosures.get("lease_expense_summary") or {}
+            balance = disclosures.get("balance_sheet_impact") or {}
+            maturity = disclosures.get("maturity_analysis") or {}
+            d1, d2, d3 = st.columns(3)
+            d1.metric("ROU asset", f"${float(initial.get('rou_asset') or 0):,.2f}")
+            d2.metric("Lease liability", f"${float(initial.get('lease_liability') or 0):,.2f}")
+            d3.metric("Classification", disclosure_package["model"].get("classification") or "N/A")
+            if maturity:
+                st.markdown("**Maturity analysis (undiscounted)**")
+                st.dataframe(
+                    pd.DataFrame(
+                        [{"Year": year, "Payments": amount} for year, amount in sorted(maturity.items())]
+                    ),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+            st.markdown("**Expense and balance-sheet amounts**")
+            st.write(
+                {
+                    "Total interest": expense.get("total_interest_expense"),
+                    "Total amortization": expense.get("total_depreciation_expense"),
+                    "Current liability": balance.get("current_liability"),
+                    "Non-current liability": balance.get("non_current_liability"),
+                }
+            )
+            _render_report_downloads(disclosure_package, "disclosure")
+        except Exception as disclosure_error:
+            st.error(f"Could not build disclosures for this calculation: {disclosure_error}")
 
 with tab4:
     st.subheader("📄 Generate Compliance Reports")
-    
-    st.info("🚧 Professional PDF Report Generation - Coming Soon!")
-    
-    st.markdown("""
-    The compliance report will include:
-    
-    ### 📊 Executive Summary
-    - Portfolio overview
-    - Total assets and liabilities
-    - Key metrics and trends
-    
-    ### 📋 Detailed Calculations
-    - Individual lease calculations
-    - Classification analysis
-    - All schedules and tables
-    
-    ### 📝 Journal Entries
-    - Initial recognition entries
-    - Monthly/annual adjustments
-    - All subsequent measurements
-    
-    ### 📑 Financial Disclosures
-    - Required ASC 842 disclosures
-    - Maturity analysis tables
-    - Qualitative descriptions
-    
-    ### 📈 Schedules & Exhibits
-    - Liability amortization schedules
-    - ROU asset schedules
-    - Sensitivity analysis
-    
-    **Report Format:** Professional PDF with branded headers, tables, and charts
-    """)
+    st.markdown(
+        "Download the client ASC 842 / IFRS 16 package: classification, initial measurement, "
+        "maturity analysis, journal entries, and amortization schedules."
+    )
+
+    try:
+        report_calcs = _load_saved_calculations()
+    except Exception as load_error:
+        report_calcs = []
+        st.info(f"No saved calculations are available yet: {load_error}")
+
+    if not report_calcs:
+        st.info("Run a calculation in the New Calculation tab, then generate the report here.")
+    else:
+        report_options = {_calculation_label(calc): calc for calc in report_calcs}
+        selected_report_label = st.selectbox(
+            "Select a saved calculation",
+            list(report_options.keys()),
+            key="asc842_report_calc",
+        )
+        selected_report = report_options[selected_report_label]
+        prepared_for = st.text_input(
+            "Prepared for (client / customer)",
+            value=(selected_report.get("leases") or {}).get("tenant_name") or "",
+            key="asc842_report_prepared_for",
+        )
+        if st.button("📄 Generate compliance report", type="primary", key="asc842_generate_report"):
+            try:
+                st.session_state["asc842_generated_package"] = _package_for_calculation(
+                    selected_report,
+                    prepared_for=prepared_for,
+                )
+            except Exception as generate_error:
+                st.error(f"Could not generate the report: {generate_error}")
+
+        generated = st.session_state.get("asc842_generated_package")
+        if generated:
+            model = generated["model"]
+            g1, g2, g3, g4 = st.columns(4)
+            g1.metric("Classification", model.get("classification") or "N/A")
+            g2.metric("ROU asset", f"${float(model.get('initial_rou_asset') or 0):,.2f}")
+            g3.metric("Lease liability", f"${float(model.get('initial_liability') or 0):,.2f}")
+            g4.metric("Term", f"{model.get('lease_term_months') or 0} mo")
+            _render_report_downloads(generated, "generate")
 
 with tab5:
     st.subheader("📚 ASC 842 Implementation Guidance")
