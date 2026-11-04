@@ -188,12 +188,12 @@ with st.sidebar:
     # Get all leases with amendments
     try:
         leases_response = sb.table("leases").select(
-            "id, property_address, tenant_name, filename"
+            "id, property_address, tenant_name, filename, client_id"
         ).execute()
         leases = leases_response.data or []
     except Exception:
         leases_response = sb.table("leases").select(
-            "id, property_address, tenant_name"
+            "id, property_address, tenant_name, client_id"
         ).execute()
         leases = leases_response.data or []
     
@@ -553,17 +553,22 @@ with tab5:
     st.caption(f"Controlling as of {value['as_of']} · Prepared for {value['prepared_for']}")
 
     if report_model["changed_clauses"]:
-        st.markdown("#### Schedule A — Controlling language vs original")
+        st.markdown("#### Schedule A — What each numbered amendment changed")
         for clause in report_model["changed_clauses"]:
-            with st.expander(clause["clause_type"], expanded=True):
+            title = (
+                f"Change {clause.get('change_number')} — {clause['clause_type']} · "
+                f"{clause.get('governing_label')} · {clause.get('change_summary')}"
+            )
+            with st.expander(title, expanded=True):
                 st.caption(
-                    f"Governed by {clause['governing_source']} v{clause['governing_version']} "
-                    f"({clause['modification_type']}), effective {clause['effective_from']}"
+                    f"{clause.get('governing_label')} · {clause.get('modification_type')} · "
+                    f"effective {clause.get('effective_from')}"
                 )
+                st.markdown(f"**What changed:** {clause.get('change_summary')}")
                 left, right = st.columns(2)
                 left.markdown("**Original lease**")
                 left.write(clause["original_value"])
-                right.markdown("**Current governing clause**")
+                right.markdown(f"**{clause.get('governing_label') or 'Amendment'}**")
                 right.write(clause["governing_value"])
     else:
         st.info("No clause has been superseded yet. The original lease language still governs.")
@@ -586,6 +591,55 @@ with tab5:
             mime="application/pdf",
             key=f"amendment_report_pdf_{selected_lease_id}",
         )
+
+        default_email = ""
+        client_id = selected_lease.get("client_id")
+        if client_id:
+            try:
+                client_row = (
+                    sb.table("clients")
+                    .select("email")
+                    .eq("id", client_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if client_row:
+                    default_email = client_row[0].get("email") or ""
+            except Exception:
+                default_email = ""
+
+        st.markdown("#### Email this abstract to the client")
+        recipient_email = st.text_input(
+            "Client email",
+            value=default_email,
+            placeholder="client@company.com",
+            key=f"abstract_email_{selected_lease_id}",
+        )
+        if st.button(
+            "📧 Email Amendment Resolution Abstract",
+            key=f"abstract_email_send_{selected_lease_id}",
+        ):
+            from email_delivery import send_amendment_abstract_email
+
+            sent = send_amendment_abstract_email(
+                recipient_email=recipient_email.strip(),
+                recipient_name=prepared_for or report_model["tenant_name"],
+                property_address=report_model["property_address"],
+                tenant_name=report_model["tenant_name"],
+                pdf_bytes=report_pdf,
+                filename=abstract_filename(report_model),
+                as_of=report_model["as_of"],
+                amendments_resolved=value["amendments_resolved"],
+                clauses_superseded=value["clauses_superseded"],
+            )
+            if sent:
+                st.success(f"Abstract emailed to {recipient_email.strip()}")
+            else:
+                st.error(
+                    "Could not send the email. Check the address and that SendGrid is configured."
+                )
     except Exception as e:
         st.error(f"Could not build the amendment report PDF: {e}")
 

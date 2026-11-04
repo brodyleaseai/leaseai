@@ -5,8 +5,10 @@ from io import BytesIO
 
 from amendment_report import (
     abstract_filename,
+    amendment_label,
     build_amendment_resolution_model,
     generate_amendment_resolution_pdf,
+    summarize_clause_change,
 )
 
 
@@ -30,6 +32,7 @@ HISTORY = [
         "clause_type": "Base Rent",
         "version_number": 1,
         "source_document_type": "AMENDMENT",
+        "source_document_id": "amd-1",
         "clause_value": "$9,000.00 per month",
         "is_current": True,
         "effective_from": "2024-06-01",
@@ -48,6 +51,7 @@ HISTORY = [
 
 AMENDMENTS = [
     {
+        "amendment_id": "amd-1",
         "amendment_number": 1,
         "amendment_date": "2024-06-01",
         "status": "READY FOR REVIEW",
@@ -67,6 +71,9 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(rent["original_value"], "$8,550.08 per month")
         self.assertEqual(rent["governing_value"], "$9,000.00 per month")
         self.assertEqual(rent["governing_source"], "AMENDMENT")
+        self.assertEqual(rent["governing_label"], "Amendment No. 1 (2024-06-01)")
+        self.assertEqual(rent["change_summary"], "$8,550.08 → $9,000.00")
+        self.assertEqual(rent["change_number"], 1)
         value = model["value"]
         self.assertEqual(value["deliverable_name"], "Amendment Resolution Abstract")
         self.assertEqual(value["amendments_resolved"], 1)
@@ -93,6 +100,21 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(model["amendments"], [])
         self.assertEqual(model["value"]["amendments_resolved"], 0)
 
+    def test_summarize_clause_change_matches_co_diagnostics_style(self):
+        self.assertEqual(summarize_clause_change("5%", "cap shall not exceed 3.5% per annum"), "5% → 3.5%")
+        self.assertEqual(
+            summarize_clause_change(
+                "holdover rent shall be 150% of the last active month's Base Rent, requiring a minimum of 30 days prior notice.",
+                "Holdover Provision Rate shall be adjusted downward from 150% to 125%",
+            ),
+            "150% → 125%",
+        )
+        self.assertEqual(
+            summarize_clause_change("$2,500.00", "reduced from $2,500.00 down to $1,500.00"),
+            "$2,500.00 → $1,500.00",
+        )
+        self.assertEqual(amendment_label(1, "2025-01-02"), "Amendment No. 1 (2025-01-02)")
+
 
 class PdfTests(unittest.TestCase):
     def test_pdf_contains_original_and_governing_language(self):
@@ -115,6 +137,10 @@ class PdfTests(unittest.TestCase):
         self.assertIn("$9,000.00", text)
         self.assertIn("Permitted Use", text)
         self.assertIn("Schedule A", text)
+        self.assertIn("Amendment No. 1", text)
+        self.assertIn("What changed", text)
+        self.assertIn("$8,550.08 → $9,000.00", text)
+        self.assertIn("Change 1 of 1", text)
         self.assertIn("Exhibit A", text)
         self.assertIn("still governed by the original lease", text.lower())
         self.assertIn("not a legal opinion", text.lower())

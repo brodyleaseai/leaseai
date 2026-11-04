@@ -17,6 +17,11 @@ $files = @(
         Name = "amendment_report.py"
     },
     @{
+        Url = "$base/email_delivery.py"
+        Out = "email_delivery.py"
+        Name = "email_delivery.py"
+    },
+    @{
         Url = "$base/pages/3_%F0%9F%94%97_Amendment_Graph.py"
         Out = "pages/3_🔗_Amendment_Graph.py"
         Name = "Amendment Graph page"
