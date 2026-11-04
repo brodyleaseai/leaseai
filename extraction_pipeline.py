@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+from extraction_enrichment import enrich_extracted_fields
 
 
 class LeaseExtractionPipeline:
@@ -378,6 +379,10 @@ IMPORTANT INSTRUCTIONS:
 - Use exact dates in YYYY-MM-DD format
 - Include units for all measurements (sq ft, months, %, $, etc.)
 - For rent schedules, show the exact monthly amount and ALL rent periods/years if escalating
+- "Full Rent Schedule (all years)" is mandatory whenever a multi-year rate table exists. List every year, not only Years 1-5. If rent is stated as $ per RSF per year, convert to monthly (RSF × rate / 12) and include all years
+- Do not mark Full Rent Schedule as NOT FOUND if Section 5 (or equivalent) lists annual rates
+- Do not copy the landlord's office suite into Suite / Unit Number unless that suite is the leased premises
+- If the lease says approximately 3% compounded, fill Annual Escalation Type and Rate even when a dollar-rate table is also stated
 - For responsibilities, specify "Landlord", "Tenant", or "Shared"
 - Extract COMPLETE clauses - do not truncate mid-sentence
 - Be thorough but precise - don't invent information
@@ -431,8 +436,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 response_text = response_text[json_start:json_end].strip()
             
             extracted_fields = json.loads(response_text)
-            
-            return extracted_fields
+            return enrich_extracted_fields(extracted_fields, lease_text)
         
         except json.JSONDecodeError as e:
             raise Exception(f"Failed to parse GPT-4 response as JSON: {str(e)}")
