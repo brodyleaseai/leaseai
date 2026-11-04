@@ -268,6 +268,70 @@ def send_lease_abstract_email(
         return False
 
 
+def send_asc842_report_email(
+    recipient_email: str,
+    recipient_name: str,
+    property_address: str,
+    tenant_name: str,
+    pdf_bytes: bytes,
+    filename: str,
+    classification: str,
+    rou_asset: float,
+    liability: float,
+) -> bool:
+    """Email the ASC 842 / IFRS 16 compliance PDF to the client."""
+    if not recipient_email or "@" not in recipient_email:
+        return False
+    if not config.SENDGRID_API_KEY or "your-sendgrid" in str(config.SENDGRID_API_KEY).lower():
+        print("⚠️ SendGrid not configured - skipping ASC 842 report email")
+        return False
+
+    subject = f"ASC 842 / IFRS 16 Compliance Report — {property_address}"
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1976D2;">Your ASC 842 / IFRS 16 compliance report is ready</h2>
+            <p>Dear {recipient_name},</p>
+            <p>Attached is the lease accounting measurement package for this lease.</p>
+            <div style="background-color: #E3F2FD; padding: 15px; border-left: 4px solid #1976D2; margin: 20px 0;">
+                <strong>Property:</strong> {property_address}<br>
+                <strong>Tenant:</strong> {tenant_name}<br>
+                <strong>Classification:</strong> {classification}<br>
+                <strong>Initial ROU asset:</strong> ${float(rou_asset or 0):,.2f}<br>
+                <strong>Initial lease liability:</strong> ${float(liability or 0):,.2f}
+            </div>
+            <p>The PDF includes classification, initial measurement, maturity analysis, journal entries, and the first twelve months of each amortization schedule.</p>
+            <p>This attachment is a file exhibit of calculated measurements. It is not a legal opinion or an audit report.</p>
+            <p>Best regards,<br>
+            <strong>{config.SENDER_NAME}</strong><br>
+            {config.COMPANY_NAME}<br>
+            {config.COMPANY_LOCATION}</p>
+        </div>
+    </body>
+    </html>
+    """
+    message = Mail(
+        from_email=(config.SENDER_EMAIL, config.SENDER_NAME),
+        to_emails=recipient_email,
+        subject=subject,
+        html_content=html_content,
+    )
+    encoded_pdf = base64.b64encode(pdf_bytes).decode()
+    message.attachment = Attachment(
+        FileContent(encoded_pdf),
+        FileName(filename),
+        FileType("application/pdf"),
+        Disposition("attachment"),
+    )
+    try:
+        response = SendGridAPIClient(config.SENDGRID_API_KEY).send(message)
+        return response.status_code in (200, 202)
+    except Exception as e:
+        print(f"Failed to send ASC 842 report email: {str(e)}")
+        return False
+
+
 def send_critical_date_reminder(
     client_email: str,
     client_name: str,
