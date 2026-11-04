@@ -138,18 +138,81 @@ def abstract_filename(model: Dict[str, Any]) -> str:
     return f"Amendment-Resolution-Abstract-{tenant}-{as_of}.pdf"
 
 
+_CHANGE_TYPES = {
+    "MODIFIES",
+    "SUPERSEDES",
+    "ADDS",
+    "DELETES",
+    "CONDITIONALLY_MODIFIES",
+}
+
+
+def _clause_change_lookup(amendment_clauses: Optional[Iterable[dict]]) -> Dict[str, dict]:
+    lookup: Dict[str, dict] = {}
+    rows = [row for row in (amendment_clauses or []) if row.get("clause_type")]
+    rows.sort(key=lambda row: str(row.get("effective_date") or row.get("created_at") or ""))
+    for row in rows:
+        lookup[row["clause_type"]] = row
+    return lookup
+
+
+def _modified_clause_names(
+    amendments: Iterable[dict],
+    clause_changes: Dict[str, dict],
+) -> set:
+    names = set(clause_changes)
+    for amendment in amendments:
+        for name in amendment.get("modified_clauses") or []:
+            if name:
+                names.add(name)
+    return names
+
+
+def _resolve_clause_values(
+    original_value: str,
+    governing_value: str,
+    recorded_change: Optional[dict],
+) -> tuple[str, str]:
+    """Prefer the recorded amendment before/after when history collapsed."""
+    recorded = recorded_change or {}
+    recorded_original = _clean(recorded.get("original_value"))
+    recorded_new = _clean(recorded.get("new_value"))
+    if recorded_original and (
+        not original_value
+        or original_value == governing_value
+        or (recorded_new and original_value == recorded_new)
+    ):
+        original_value = recorded_original
+    if recorded_new and (not governing_value or governing_value == original_value):
+        governing_value = recorded_new
+    if (
+        original_value
+        and governing_value
+        and original_value == governing_value
+        and recorded_original
+        and recorded_new
+        and recorded_original != recorded_new
+    ):
+        original_value = recorded_original
+        governing_value = recorded_new
+    return original_value, governing_value
+
+
 def build_amendment_resolution_model(
     lease: Optional[dict],
     amendments: Optional[Iterable[dict]],
     history_rows: Optional[Iterable[dict]],
     as_of: Optional[str] = None,
     prepared_for: Optional[str] = None,
+    amendment_clauses: Optional[Iterable[dict]] = None,
 ) -> Dict[str, Any]:
     """Group clause history into original vs current governing values."""
     lease = lease or {}
     amendment_list = list(amendments or [])
     amendment_list.sort(key=lambda item: item.get("amendment_number") or 0)
     amendments_by_id = _amendment_lookup(amendment_list)
+    clause_changes = _clause_change_lookup(amendment_clauses)
+    modified_names = _modified_clause_names(amendment_list, clause_changes)
 
     by_type: Dict[str, List[dict]] = {}
     for row in history_rows or []:
@@ -159,7 +222,9 @@ def build_amendment_resolution_model(
         by_type.setdefault(clause_type, []).append(row)
 
     clauses: List[dict] = []
+    seen_types = set()
     for clause_type, rows in sorted(by_type.items()):
+        seen_types.add(clause_type)
         versions = _sort_versions(rows)
         original = next(
             (
@@ -170,37 +235,81 @@ def build_amendment_resolution_model(
             versions[0],
         )
         current = next((row for row in versions if row.get("is_current")), versions[-1])
-        original_value = _clean(original.get("clause_value"))
-        governing_value = _clean(current.get("clause_value"))
-        source_id = str(current.get("source_document_id") or "")
+        original_value, governing_value = _resolve_clause_values(
+            _clean(original.get("clause_value")),
+            _clean(current.get("clause_value")),
+            clause_changes.get(clause_type),
+        )
+        recorded = clause_changes.get(clause_type) or {}
+        source_id = str(current.get("source_document_id") or recorded.get("amendment_id") or "")
         linked = amendments_by_id.get(source_id, {})
         amendment_number = linked.get("amendment_number")
         amendment_date = linked.get("amendment_date")
-        if amendment_number in (None, "") and current.get("source_document_type") == "AMENDMENT":
-            amendment_number = current.get("version_number")
-        if not amendment_date:
-            amendment_date = current.get("effective_from")
-        label = (
-            amendment_label(amendment_number, amendment_date)
-            if current.get("source_document_type") == "AMENDMENT"
-            else "Original lease"
+        source_is_amendment = (
+            current.get("source_document_type") == "AMENDMENT"
+            or clause_type in modified_names
+            or bool(recorded)
         )
+        if amendment_number in (None, "") and source_is_amendment:
+            amendment_number = current.get("version_number") or 1
+        if not amendment_date:
+            amendment_date = current.get("effective_from") or recorded.get("effective_date")
+        modification_type = (
+            current.get("modification_type")
+            or recorded.get("modification_type")
+            or "Original"
+        )
+        changed = (
+            original_value != governing_value
+            or source_is_amendment
+            or str(modification_type).upper() in _CHANGE_TYPES
+        )
+        label = amendment_label(amendment_number, amendment_date) if changed else "Original lease"
         clauses.append(
             {
                 "clause_type": clause_type,
                 "original_value": original_value or "N/A",
                 "governing_value": governing_value or "N/A",
-                "changed": original_value != governing_value,
+                "changed": changed,
                 "original_source": original.get("source_document_type") or "BASE_LEASE",
-                "governing_source": current.get("source_document_type") or "BASE_LEASE",
+                "governing_source": current.get("source_document_type") or (
+                    "AMENDMENT" if changed else "BASE_LEASE"
+                ),
                 "governing_version": current.get("version_number"),
                 "governing_amendment_number": amendment_number,
                 "governing_amendment_date": amendment_date,
                 "governing_label": label,
                 "change_summary": summarize_clause_change(original_value, governing_value),
-                "effective_from": current.get("effective_from"),
-                "modification_type": current.get("modification_type") or "Original",
+                "effective_from": current.get("effective_from") or recorded.get("effective_date"),
+                "modification_type": modification_type,
                 "versions": versions,
+            }
+        )
+
+    for clause_type in sorted(modified_names - seen_types):
+        recorded = clause_changes.get(clause_type) or {}
+        linked = amendments_by_id.get(str(recorded.get("amendment_id") or ""), amendment_list[0] if amendment_list else {})
+        original_value = _clean(recorded.get("original_value")) or "Not separately retained"
+        governing_value = _clean(recorded.get("new_value")) or "N/A"
+        clauses.append(
+            {
+                "clause_type": clause_type,
+                "original_value": original_value,
+                "governing_value": governing_value,
+                "changed": True,
+                "original_source": "BASE_LEASE",
+                "governing_source": "AMENDMENT",
+                "governing_version": linked.get("amendment_number") or 1,
+                "governing_amendment_number": linked.get("amendment_number") or 1,
+                "governing_amendment_date": linked.get("amendment_date"),
+                "governing_label": amendment_label(
+                    linked.get("amendment_number") or 1,
+                    linked.get("amendment_date"),
+                ),
+                "change_summary": summarize_clause_change(original_value, governing_value),
+                "effective_from": recorded.get("effective_date") or linked.get("amendment_date"),
+                "modification_type": recorded.get("modification_type") or "MODIFIES",
+                "versions": [],
             }
         )
 
@@ -349,7 +458,7 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
         )
     else:
         rows = [[
-            Paragraph("Amendment No.", header_style),
+            Paragraph("No.", header_style),
             Paragraph("Date", header_style),
             Paragraph("Status", header_style),
             Paragraph("Clauses modified", header_style),
@@ -359,13 +468,13 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
             modified_text = ", ".join(_clean(item) for item in modified if item) or "None recorded"
             rows.append(
                 [
-                    Paragraph(_pdf_text(f"No. {amendment.get('amendment_number')}"), body_style),
+                    Paragraph(_pdf_text(amendment.get("amendment_number")), body_style),
                     Paragraph(_pdf_text(amendment.get("amendment_date")), body_style),
                     Paragraph(_pdf_text(amendment.get("status")), body_style),
                     Paragraph(_pdf_text(modified_text, limit=400), body_style),
                 ]
             )
-        timeline = Table(rows, colWidths=[0.6 * inch, 1.3 * inch, 1.6 * inch, 3.3 * inch])
+        timeline = Table(rows, colWidths=[0.55 * inch, 1.3 * inch, 1.7 * inch, 3.25 * inch])
         timeline.setStyle(
             TableStyle(
                 [
@@ -382,7 +491,7 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
         )
         story.append(timeline)
 
-    story.append(Paragraph("Schedule A — What each numbered amendment changed", heading_style))
+    story.append(Paragraph("Schedule A — Controlling language that replaced the original", heading_style))
     changed = model.get("changed_clauses") or []
     if not changed:
         story.append(
@@ -392,100 +501,31 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
             )
         )
     else:
-        story.append(
-            Paragraph(
-                "Read the change index first, then the side-by-side language. "
-                "Each change is numbered and tied to an amendment number and date.",
-                body_style,
-            )
-        )
-        story.append(Spacer(1, 0.1 * inch))
-        index_rows = [[
-            Paragraph("Change", header_style),
-            Paragraph("Clause", header_style),
-            Paragraph("Source amendment", header_style),
-            Paragraph("What changed", header_style),
-        ]]
         for clause in changed:
-            index_rows.append(
-                [
-                    Paragraph(_pdf_text(clause.get("change_number")), body_style),
-                    Paragraph(_pdf_text(clause.get("clause_type")), body_style),
-                    Paragraph(_pdf_text(clause.get("governing_label")), body_style),
-                    Paragraph(_pdf_text(clause.get("change_summary"), limit=240), body_style),
-                ]
-            )
-        index_table = Table(index_rows, colWidths=[0.7 * inch, 1.6 * inch, 2.0 * inch, 2.5 * inch])
-        index_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFF8E1")),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#90CAF9")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ]
-            )
-        )
-        story.append(index_table)
-        story.append(Spacer(1, 0.16 * inch))
-
-        compare_header = ParagraphStyle(
-            "AmendmentCompareHeader",
-            parent=header_style,
-            fontSize=8,
-        )
-        for clause in changed:
-            before_after = Table(
-                [
-                    [
-                        Paragraph("Original lease", compare_header),
-                        Paragraph(_pdf_text(clause.get("governing_label") or "Amendment"), compare_header),
-                    ],
-                    [
-                        Paragraph(_pdf_text(clause.get("original_value")), body_style),
-                        Paragraph(_pdf_text(clause.get("governing_value")), body_style),
-                    ],
-                ],
-                colWidths=[3.4 * inch, 3.4 * inch],
-            )
-            before_after.setStyle(
-                TableStyle(
-                    [
-                        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#B71C1C")),
-                        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#1B5E20")),
-                        ("BACKGROUND", (0, 1), (0, 1), colors.HexColor("#FFEBEE")),
-                        ("BACKGROUND", (1, 1), (1, 1), colors.HexColor("#E8F5E9")),
-                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#90CAF9")),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                        ("TOPPADDING", (0, 0), (-1, -1), 5),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                    ]
-                )
-            )
             block = [
                 Paragraph(
-                    f"Change {clause.get('change_number')} of {len(changed)} — "
-                    f"{_pdf_text(clause.get('clause_type'))}",
+                    f"{_pdf_text(clause.get('change_number'))}. {_pdf_text(clause.get('clause_type'))} — "
+                    f"{_pdf_text(clause.get('governing_label'))}",
                     label_style,
                 ),
                 Paragraph(
-                    f"{_pdf_text(clause.get('governing_label'))} · "
-                    f"{_pdf_text(clause.get('modification_type'))} · "
-                    f"effective {_pdf_text(clause.get('effective_from'))}",
+                    f"<b>Changed:</b> {_pdf_text(clause.get('change_summary'))}",
                     body_style,
                 ),
                 Paragraph(
-                    f"<b>What changed:</b> {_pdf_text(clause.get('change_summary'))}",
+                    f"{_pdf_text(clause.get('modification_type'))}, "
+                    f"effective {_pdf_text(clause.get('effective_from'))}.",
                     body_style,
                 ),
                 Spacer(1, 0.06 * inch),
-                before_after,
+                Paragraph("<b>Original lease</b>", label_style),
+                Paragraph(_pdf_text(clause.get("original_value")), body_style),
+                Spacer(1, 0.06 * inch),
+                Paragraph(
+                    f"<b>Now governed by {_pdf_text(clause.get('governing_label'))}</b>",
+                    label_style,
+                ),
+                Paragraph(_pdf_text(clause.get("governing_value")), body_style),
                 Spacer(1, 0.16 * inch),
             ]
             story.append(KeepTogether(block))

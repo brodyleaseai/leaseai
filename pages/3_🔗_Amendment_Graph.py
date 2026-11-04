@@ -536,12 +536,30 @@ with tab5:
         report_amendments = []
         st.error(f"Could not load amendment chain for the report: {e}")
 
+    report_clause_changes = []
+    for amendment in report_amendments:
+        amendment_id = amendment.get("amendment_id")
+        if not amendment_id:
+            continue
+        try:
+            report_clause_changes.extend(
+                sb.table("amendment_clauses")
+                .select("*")
+                .eq("amendment_id", amendment_id)
+                .execute()
+                .data
+                or []
+            )
+        except Exception as e:
+            st.error(f"Could not load recorded amendment clauses: {e}")
+
     report_model = build_amendment_resolution_model(
         selected_lease,
         report_amendments,
         report_history,
         as_of=query_date.isoformat(),
         prepared_for=prepared_for,
+        amendment_clauses=report_clause_changes,
     )
     value = report_model["value"]
 
@@ -553,23 +571,21 @@ with tab5:
     st.caption(f"Controlling as of {value['as_of']} · Prepared for {value['prepared_for']}")
 
     if report_model["changed_clauses"]:
-        st.markdown("#### Schedule A — What each numbered amendment changed")
+        st.markdown("#### Schedule A — Controlling language vs original")
         for clause in report_model["changed_clauses"]:
             title = (
-                f"Change {clause.get('change_number')} — {clause['clause_type']} · "
-                f"{clause.get('governing_label')} · {clause.get('change_summary')}"
+                f"{clause.get('change_number')}. {clause['clause_type']} — "
+                f"{clause.get('governing_label')} — {clause.get('change_summary')}"
             )
             with st.expander(title, expanded=True):
                 st.caption(
-                    f"{clause.get('governing_label')} · {clause.get('modification_type')} · "
-                    f"effective {clause.get('effective_from')}"
+                    f"{clause.get('modification_type')}, effective {clause.get('effective_from')}"
                 )
-                st.markdown(f"**What changed:** {clause.get('change_summary')}")
-                left, right = st.columns(2)
-                left.markdown("**Original lease**")
-                left.write(clause["original_value"])
-                right.markdown(f"**{clause.get('governing_label') or 'Amendment'}**")
-                right.write(clause["governing_value"])
+                st.markdown(f"**Changed:** {clause.get('change_summary')}")
+                st.markdown("**Original lease**")
+                st.write(clause["original_value"])
+                st.markdown(f"**Now governed by {clause.get('governing_label')}**")
+                st.write(clause["governing_value"])
     else:
         st.info("No clause has been superseded yet. The original lease language still governs.")
 
