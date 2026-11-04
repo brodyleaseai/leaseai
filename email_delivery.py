@@ -268,6 +268,80 @@ def send_lease_abstract_email(
         return False
 
 
+def send_amendment_abstract_email(
+    recipient_email: str,
+    recipient_name: str,
+    property_address: str,
+    tenant_name: str,
+    pdf_bytes: bytes,
+    filename: str,
+    as_of: str,
+    amendments_resolved: int,
+    clauses_superseded: int,
+) -> bool:
+    """Email the Amendment Resolution Abstract PDF to the client."""
+    if not recipient_email or "@" not in recipient_email:
+        return False
+    if not config.SENDGRID_API_KEY or "your-sendgrid" in str(config.SENDGRID_API_KEY).lower():
+        print("⚠️ SendGrid not configured - skipping amendment abstract email")
+        return False
+
+    subject = f"Amendment Resolution Abstract — {property_address}"
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1976D2;">Your Amendment Resolution Abstract is ready</h2>
+            <p>Dear {recipient_name},</p>
+            <p>Attached is the controlling-language exhibit for this lease after every amendment has been applied.</p>
+            <div style="background-color: #E3F2FD; padding: 15px; border-left: 4px solid #1976D2; margin: 20px 0;">
+                <strong>Property:</strong> {property_address}<br>
+                <strong>Tenant:</strong> {tenant_name}<br>
+                <strong>Controlling as of:</strong> {as_of}<br>
+                <strong>Amendments resolved:</strong> {amendments_resolved}<br>
+                <strong>Clauses superseded:</strong> {clauses_superseded}
+            </div>
+            <p>Schedule A lists each numbered change (original vs the amendment that now governs). Schedule B lists clauses that are still the original lease.</p>
+            <p>This attachment is a file exhibit of resolved controlling terms. It is not a legal opinion.</p>
+            <p>Best regards,<br>
+            <strong>{config.SENDER_NAME}</strong><br>
+            {config.COMPANY_NAME}<br>
+            {config.COMPANY_LOCATION}</p>
+        </div>
+    </body>
+    </html>
+    """
+    plain_content = (
+        f"Your Amendment Resolution Abstract is ready\n\n"
+        f"Property: {property_address}\n"
+        f"Tenant: {tenant_name}\n"
+        f"Controlling as of: {as_of}\n"
+        f"Amendments resolved: {amendments_resolved}\n"
+        f"Clauses superseded: {clauses_superseded}\n\n"
+        f"The PDF is attached. This is a file exhibit, not a legal opinion.\n"
+    )
+    message = Mail(
+        from_email=(config.SENDER_EMAIL, config.SENDER_NAME),
+        to_emails=recipient_email,
+        subject=subject,
+        plain_text_content=plain_content,
+        html_content=html_content,
+    )
+    encoded_pdf = base64.b64encode(pdf_bytes).decode()
+    message.attachment = Attachment(
+        FileContent(encoded_pdf),
+        FileName(filename),
+        FileType("application/pdf"),
+        Disposition("attachment"),
+    )
+    try:
+        response = SendGridAPIClient(config.SENDGRID_API_KEY).send(message)
+        return response.status_code in (200, 202)
+    except Exception as e:
+        print(f"Failed to send amendment abstract email: {str(e)}")
+        return False
+
+
 def send_critical_date_reminder(
     client_email: str,
     client_name: str,
