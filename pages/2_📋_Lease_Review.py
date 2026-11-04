@@ -126,6 +126,32 @@ def update_lease_status(lease_id, status):
     }).eq("id", lease_id).execute()
 
 
+def persist_enriched_extraction(lease_id, original_fields, enriched_fields):
+    """Write report-time fills back so the next review/PDF uses them."""
+    by_name = {field.get("field_name"): field for field in original_fields or []}
+    for name, data in (enriched_fields or {}).items():
+        row = by_name.get(name)
+        if not row or not row.get("id"):
+            continue
+        if row.get("reviewed") and row.get("reviewed_value"):
+            continue
+        new_value = data.get("value") if isinstance(data, dict) else data
+        old_value = row.get("reviewed_value") or row.get("raw_value") or ""
+        if not new_value or str(new_value) == str(old_value):
+            continue
+        payload = {"raw_value": new_value}
+        if isinstance(data, dict):
+            if data.get("confidence"):
+                payload["confidence"] = data["confidence"]
+            if data.get("notes"):
+                payload["notes"] = data["notes"]
+        sb.table("extracted_fields").update(payload).eq("id", row["id"]).execute()
+    try:
+        sb.table("leases").update({"extracted_data": enriched_fields}).eq("id", lease_id).execute()
+    except Exception:
+        pass
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAV
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -498,6 +524,7 @@ elif page == "🔍 Review a Lease":
     with col_pdf:
         if st.button("📥 Generate PDF Report", use_container_width=True, type="primary"):
             try:
+                from extraction_enrichment import enrich_extracted_fields
                 from lease_report import generate_lease_abstract_pdf
                 
                 # Prepare extracted fields dictionary
@@ -506,8 +533,21 @@ elif page == "🔍 Review a Lease":
                     field_name = field.get("field_name", "Unknown")
                     extracted_dict[field_name] = {
                         "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
+                        "raw_value": field.get("raw_value") or "",
+                        "reviewed_value": field.get("reviewed_value") or "",
+                        "confidence": field.get("confidence", "MEDIUM"),
+                        "source_snippet": field.get("source_text") or "",
+                        "notes": field.get("notes") or "",
                     }
+
+                extracted_dict = enrich_extracted_fields(
+                    extracted_dict,
+                    lease.get("lease_text") or lease.get("extracted_text") or "",
+                )
+                try:
+                    persist_enriched_extraction(lease_id, fields, extracted_dict)
+                except Exception:
+                    pass
                 
                 # Generate PDF
                 pdf_bytes = generate_lease_abstract_pdf(lease, extracted_dict)

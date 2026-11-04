@@ -15,6 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
+from extraction_enrichment import enrich_extracted_fields
 
 
 def _make_colored_box(box_color: str):
@@ -115,6 +116,15 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     Returns:
         PDF content as bytes
     """
+    lease_text = ""
+    if isinstance(lease_data, dict):
+        lease_text = (
+            lease_data.get("lease_text")
+            or lease_data.get("extracted_text")
+            or ""
+        )
+    extracted_fields = enrich_extracted_fields(extracted_fields, lease_text)
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -320,7 +330,12 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     for field_name, field_info in extracted_fields.items():
         if isinstance(field_info, dict):
-            value = field_info.get("value", "NOT FOUND")
+            value = (
+                field_info.get("value")
+                or field_info.get("reviewed_value")
+                or field_info.get("raw_value")
+                or "NOT FOUND"
+            )
             confidence = field_info.get("confidence", None)
         else:
             value = str(field_info)

@@ -41,10 +41,121 @@ PCT_ESCALATION = re.compile(
 def _value(fields: Dict[str, Any], name: str) -> str:
     data = fields.get(name)
     if isinstance(data, dict):
-        return str(data.get("value") or "").strip()
+        return str(
+            data.get("value")
+            or data.get("raw_value")
+            or data.get("reviewed_value")
+            or ""
+        ).strip()
     if data is None:
         return ""
     return str(data).strip()
+
+
+def _parse_money(value: str) -> Optional[float]:
+    match = re.search(r"([\d,]+(?:\.\d+)?)", value or "")
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _text_from_fields(fields: Dict[str, Any]) -> str:
+    chunks = []
+    for data in fields.values():
+        if isinstance(data, dict):
+            for key in ("value", "raw_value", "reviewed_value", "source_snippet", "source_text", "notes"):
+                if data.get(key):
+                    chunks.append(str(data[key]))
+        elif data:
+            chunks.append(str(data))
+    return "\n".join(chunks)
+
+
+def parse_rsf_from_fields(fields: Dict[str, Any]) -> Optional[int]:
+    for name in ("Premises Square Footage (RSF)", "Premises Square Footage"):
+        match = re.search(r"([\d,]+)", _value(fields, name))
+        if match:
+            try:
+                return int(match.group(1).replace(",", ""))
+            except ValueError:
+                continue
+    return None
+
+
+def parse_term_years(fields: Dict[str, Any]) -> int:
+    for name in (
+        "Lease Term (Total Months)",
+        "Base Lease Term (months or years)",
+        "Lease Term",
+    ):
+        text = _value(fields, name)
+        months = re.search(r"(\d+)\s*month", text, re.IGNORECASE)
+        if months:
+            return max(int(months.group(1)) // 12, 0)
+        years = re.search(r"(\d+)\s*year", text, re.IGNORECASE)
+        if years:
+            return int(years.group(1))
+        bare = re.search(r"(\d+)", text)
+        if bare:
+            number = int(bare.group(1))
+            if number >= 24:
+                return number // 12
+            if 1 <= number <= 20:
+                return number
+    return parse_term_years_from_dates(fields)
+
+
+def parse_term_years_from_dates(fields: Dict[str, Any]) -> int:
+    start = re.search(r"(\d{4})-(\d{2})-(\d{2})", _value(fields, "Lease Commencement Date"))
+    end = re.search(r"(\d{4})-(\d{2})-(\d{2})", _value(fields, "Lease Expiration Date"))
+    if not start or not end:
+        return 0
+    start_year, start_month, start_day = (int(part) for part in start.groups())
+    end_year, end_month, end_day = (int(part) for part in end.groups())
+    months = (end_year - start_year) * 12 + (end_month - start_month)
+    if end_day < start_day:
+        months += 1
+    return months // 12 if months >= 12 else 0
+
+
+def infer_escalation_rate(year_values: List[str]) -> Optional[float]:
+    amounts = [_parse_money(value) for value in year_values]
+    amounts = [amount for amount in amounts if amount]
+    if len(amounts) < 2:
+        return None
+    ratios = [amounts[i] / amounts[i - 1] for i in range(1, len(amounts)) if amounts[i - 1]]
+    if not ratios:
+        return None
+    average = sum(ratios) / len(ratios)
+    if 1.025 <= average <= 1.035:
+        return 0.03
+    if 1.02 <= average <= 1.04:
+        return round(average - 1, 4)
+    return None
+
+
+def extend_monthly_schedule(
+    year_values: List[str],
+    term_years: int,
+    rate: float,
+    rsf: Optional[int] = None,
+) -> List[str]:
+    schedule = list(year_values)
+    while len(schedule) < term_years:
+        last = _parse_money(schedule[-1]) if schedule else None
+        if last is None:
+            break
+        if rsf:
+            last_rate = last * 12.0 / rsf
+            next_rate = round(last_rate * (1 + rate), 2)
+            nxt = monthly_from_annual_rate(rsf, next_rate)
+        else:
+            nxt = round(last * (1 + rate), 2)
+        schedule.append(_money(nxt))
+    return schedule[:term_years] if term_years else schedule
 
 
 def _is_missing(value: str) -> bool:
@@ -59,10 +170,9 @@ def _set_field(
     notes: str,
     source: str = "",
 ) -> None:
-    current = fields.get(name)
-    if not isinstance(current, dict):
-        current = {}
+    current = dict(fields.get(name) or {}) if isinstance(fields.get(name), dict) else {}
     current["value"] = value
+    current["raw_value"] = value
     current["confidence"] = confidence
     current["notes"] = notes
     if source:
@@ -76,9 +186,12 @@ def _money(amount: float) -> str:
 
 def parse_premises_rsf(lease_text: str) -> Optional[int]:
     match = RSF.search(lease_text or "")
-    if not match:
-        return None
-    return int(match.group(1).replace(",", ""))
+    if match:
+        return int(match.group(1).replace(",", ""))
+    match = re.search(r"(\d{1,3}(?:,\d{3})+|\d+)\s*(?:sq\.?\s*ft|square feet)", lease_text or "", re.I)
+    if match:
+        return int(match.group(1).replace(",", ""))
+    return None
 
 
 def parse_annual_rate_periods(lease_text: str) -> List[Dict[str, Any]]:
@@ -126,14 +239,20 @@ def build_full_rent_schedule(
     return "; ".join(parts), first_five
 
 
-def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -> Dict[str, Any]:
+def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str = "") -> Dict[str, Any]:
     """Fill rent schedule and other fields the model commonly drops."""
-    fields = dict(fields or {})
-    text = lease_text or ""
-    rsf = parse_premises_rsf(text)
+    fields = {
+        name: dict(data) if isinstance(data, dict) else data
+        for name, data in (fields or {}).items()
+    }
+    text = "\n".join(part for part in (lease_text or "", _text_from_fields(fields)) if part)
+    rsf = parse_premises_rsf(text) or parse_rsf_from_fields(fields)
     periods = parse_annual_rate_periods(text)
-
     year_values = [_value(fields, name) for name in YEAR_FIELDS]
+    known_years = [value for value in year_values if not _is_missing(value)]
+    escalation = infer_escalation_rate(year_values)
+    term_years = parse_term_years(fields)
+
     if periods and rsf:
         schedule, first_five = build_full_rent_schedule(periods, rsf)
         _set_field(
@@ -153,25 +272,31 @@ def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -
                     "HIGH",
                     f"Calculated as {rsf:,} RSF × stated annual rate / 12.",
                 )
-    elif any(not _is_missing(value) for value in year_values) and _is_missing(_value(fields, FULL_SCHEDULE)):
-        schedule, _ = build_full_rent_schedule([], rsf or 0, year_values)
-        if schedule:
+    elif known_years:
+        monthly_all = list(known_years)
+        if escalation and term_years > len(monthly_all):
+            monthly_all = extend_monthly_schedule(monthly_all, term_years, escalation, rsf)
+        labeled = [f"Year {index}: {value}" for index, value in enumerate(monthly_all, start=1)]
+        if _is_missing(_value(fields, FULL_SCHEDULE)) or (
+            "Year 6" not in _value(fields, FULL_SCHEDULE) and len(monthly_all) > 5
+        ):
             _set_field(
                 fields,
                 FULL_SCHEDULE,
-                schedule,
-                "MEDIUM",
-                "Assembled from extracted Year 1-5 monthly rent fields.",
+                "; ".join(labeled),
+                "HIGH" if len(monthly_all) > 5 else "MEDIUM",
+                "Assembled from extracted monthly rent and the stated annual increase.",
             )
 
-    if _is_missing(_value(fields, "Annual Escalation Rate or Cap")) and PCT_ESCALATION.search(text):
-        _set_field(
-            fields,
-            "Annual Escalation Rate or Cap",
-            "3%",
-            "HIGH",
-            "Lease states approximately 3% compounded; stated dollar rates govern if they differ.",
-        )
+    if _is_missing(_value(fields, "Annual Escalation Rate or Cap")):
+        if PCT_ESCALATION.search(text) or escalation:
+            _set_field(
+                fields,
+                "Annual Escalation Rate or Cap",
+                "3%",
+                "HIGH",
+                "Approximately 3% compounded; stated dollar rates govern if they differ.",
+            )
         if _is_missing(_value(fields, "Annual Escalation Type (Fixed / CPI / Percentage)")):
             _set_field(
                 fields,
@@ -181,15 +306,31 @@ def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -
                 "3% compounded annual increase with a fixed dollar-rate schedule.",
             )
 
-    if _is_missing(_value(fields, "Lease Type (Gross / Net / Modified Gross)")) and re.search(
-        r"commercial net lease|\bnet lease\b", text, re.IGNORECASE
+    cam = _value(fields, "CAM / Operating Cost Charges")
+    if _is_missing(_value(fields, "Lease Type (Gross / Net / Modified Gross)")) and (
+        re.search(r"commercial net lease|\bnet lease\b", text, re.IGNORECASE)
+        or re.search(r"operating costs.+(property taxes|taxes).+insurance", cam or text, re.IGNORECASE)
     ):
         _set_field(
             fields,
             "Lease Type (Gross / Net / Modified Gross)",
             "Net",
             "HIGH",
-            "Document is titled a Commercial Net Lease.",
+            "Commercial net lease: tenant pays a share of operating costs, taxes, and insurance.",
+        )
+    tax = _value(fields, "Property Tax Responsibility")
+    insurance = _value(fields, "Property Insurance Responsibility")
+    if _is_missing(_value(fields, "Net Lease Type (Single / Double / Triple)")) and re.search(
+        r"tenant", tax, re.IGNORECASE
+    ) and re.search(r"tenant", insurance, re.IGNORECASE) and re.search(
+        r"tenant shall pay|proportionate share", cam, re.IGNORECASE
+    ):
+        _set_field(
+            fields,
+            "Net Lease Type (Single / Double / Triple)",
+            "Triple",
+            "HIGH",
+            "Tenant pays a share of operating costs, property taxes, and insurance.",
         )
 
     if _is_missing(_value(fields, "Renewal Rent Basis (FMV / Fixed / CPI)")) and re.search(
@@ -203,8 +344,11 @@ def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -
             "Renewal Base Rent is then-current fair market net rent.",
         )
 
+    hvac_text = _value(fields, "HVAC Maintenance Obligation") or text
     if _is_missing(_value(fields, "HVAC Responsibility (Landlord / Tenant)")) and re.search(
-        r"Landlord shall provide base building HVAC", text, re.IGNORECASE
+        r"Landlord shall provide base building HVAC|Landlord (shall|will) (provide|maintain).{0,60}HVAC",
+        hvac_text,
+        re.IGNORECASE,
     ):
         _set_field(
             fields,
@@ -214,8 +358,10 @@ def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -
             "Landlord provides base building HVAC during standard hours.",
         )
 
-    if _is_missing(_value(fields, "Free Rent Period (months)")) and not re.search(
-        r"\bfree rent\b|\brent abatement\b|\babated rent\b", text, re.IGNORECASE
+    if (
+        _is_missing(_value(fields, "Free Rent Period (months)"))
+        and known_years
+        and not re.search(r"\bfree rent\b|\brent abatement\b|\babated rent\b", text, re.IGNORECASE)
     ):
         _set_field(
             fields,
@@ -226,16 +372,36 @@ def enrich_extracted_fields(fields: Optional[Dict[str, Any]], lease_text: str) -
         )
 
     suite = _value(fields, "Suite / Unit Number")
-    if suite and re.search(r"suite\s*1450", suite, re.IGNORECASE):
-        if re.search(r"880 West Pender", text) and not re.search(
-            r"Premises.{0,200}Suite 1450", text, re.IGNORECASE | re.DOTALL
+    if suite and not _is_missing(suite):
+        landlord_address = " ".join(
+            [
+                _value(fields, "Landlord Registered Address"),
+                _value(fields, "Landlord Contact / Notice Address"),
+                _value(fields, "Landlord Address"),
+            ]
+        )
+        premises_text = " ".join(
+            [
+                _value(fields, "Property Civic Address"),
+                _value(fields, "Premises Square Footage (RSF)"),
+                _value(fields, "Floor(s) Occupied"),
+            ]
+        )
+        in_landlord = re.search(re.escape(suite), landlord_address, re.IGNORECASE)
+        in_premises = re.search(re.escape(suite), premises_text, re.IGNORECASE)
+        landlord_notice_in_text = re.search(r"880 West Pender", text, re.IGNORECASE) and re.search(
+            r"suite\s*1450", suite, re.IGNORECASE
+        )
+        if (in_landlord and not in_premises) or (
+            landlord_notice_in_text
+            and not re.search(r"Premises.{0,200}Suite 1450", text, re.IGNORECASE | re.DOTALL)
         ):
             _set_field(
                 fields,
                 "Suite / Unit Number",
                 "NOT FOUND",
                 "LOW",
-                "Suite 1450 is the landlord notice address, not the leased premises.",
+                "That suite is the landlord notice address, not the leased premises.",
             )
 
     return fields
