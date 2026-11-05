@@ -58,6 +58,30 @@ def lease_client_name(lease: Optional[dict]) -> str:
     return ""
 
 
+def sync_prepared_for(
+    session: Dict[str, Any],
+    *,
+    lease_id: Any,
+    client_name: str,
+    value_key: str,
+    lease_key: str,
+) -> str:
+    """Keep Prepared for on the client for the selected lease.
+
+    When the lease id changes, replace any previous name so a report cannot
+    go out under the last lease's client. An empty client name still clears
+    the stale value.
+    """
+    lease_id = str(lease_id or "")
+    client_name = str(client_name or "").strip()
+    if session.get(lease_key) != lease_id:
+        session[value_key] = client_name
+        session[lease_key] = lease_id
+    elif not str(session.get(value_key) or "").strip() and client_name:
+        session[value_key] = client_name
+    return str(session.get(value_key) or "")
+
+
 def lease_option_label(lease: dict, amendment_count: Optional[int] = None) -> str:
     """Stable unique selectbox label so two leases cannot collapse into one option."""
     address = str(lease.get("property_address") or "Unknown property").strip()

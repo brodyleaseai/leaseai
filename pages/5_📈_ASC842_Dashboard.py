@@ -31,7 +31,7 @@ except Exception:
         st.stop()
 
 from supabase import create_client
-from amendment_graph_helpers import lease_client_name, lease_option_label
+from amendment_graph_helpers import lease_client_name, lease_option_label, sync_prepared_for
 from auth_module import AuthManager
 from asc842_amendment import (
     MODE_COMMENCEMENT,
@@ -106,6 +106,7 @@ if not leases:
     st.warning("No leases found. Upload a lease first.")
     selected_lease = {}
     selected_lease_id = ""
+    selected_lease_label = ""
     amendment_bundle = {"amendments": [], "history": [], "amendment_clauses": [], "lease": {}}
     stored_amendments = []
     measurement_mode = MODE_COMMENCEMENT
@@ -718,23 +719,42 @@ with tab3:
 with tab4:
     st.subheader("📄 Generate Compliance Reports")
 
-    if selected_lease_id:
-        report_client = lease_client_name(selected_lease)
-        prepared_key = f"asc842_report_prepared_for_{selected_lease_id}"
-        if not str(st.session_state.get(prepared_key) or "").strip() and report_client:
-            st.session_state[prepared_key] = report_client
+    if not lease_options:
+        prepared_for = ""
+        st.warning("Select a lease first. Prepared for uses that lease's client name.")
+    else:
+        report_labels = list(lease_options.keys())
+        if selected_lease_label in report_labels:
+            if st.session_state.get("asc842_report_follow_lease") != selected_lease_id:
+                st.session_state["asc842_report_lease"] = selected_lease_label
+                st.session_state["asc842_report_follow_lease"] = selected_lease_id
+        report_lease_label = st.selectbox(
+            "Select lease for this report",
+            report_labels,
+            key="asc842_report_lease",
+            help="Prepared for updates to the client on this lease. Changing leases replaces the previous name.",
+        )
+        report_lease = enrich_lease_client(sb, lease_options[report_lease_label])
+        report_client = lease_client_name(report_lease)
+        sync_prepared_for(
+            st.session_state,
+            lease_id=report_lease.get("id"),
+            client_name=report_client,
+            value_key="asc842_report_prepared_for",
+            lease_key="asc842_report_prepared_lease_id",
+        )
         prepared_for = st.text_input(
             "Prepared for (client / customer)",
-            key=prepared_key,
-            help="Defaults to the client name on the selected lease. Printed on the report cover.",
+            key="asc842_report_prepared_for",
+            help="Always the client on the lease selected above. Switching leases replaces this name.",
         )
         if report_client:
-            st.caption(f"Selected lease client: {report_client}")
-        elif not prepared_for:
-            st.caption("No client name is stored on this lease. Enter the customer name above.")
-    else:
-        prepared_for = ""
-        st.warning("Select a lease at the top of the page first.")
+            st.caption(f"Client on this lease: **{report_client}**")
+        else:
+            st.warning(
+                "This lease has no client name on file. Enter the customer before generating "
+                "a report so it does not go out under the wrong name."
+            )
 
     st.info(
         "Run a calculation on the New Calculation tab, including **As amended** "

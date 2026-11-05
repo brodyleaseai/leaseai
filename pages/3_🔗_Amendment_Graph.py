@@ -14,6 +14,7 @@ from amendment_graph_helpers import (
     html_text,
     lease_client_name,
     lease_option_label,
+    sync_prepared_for,
 )
 from asc842_amendment import enrich_lease_client
 from amendment_report import (
@@ -518,14 +519,17 @@ with tab5:
     )
     st.markdown("---")
 
-    prepared_key = f"abstract_prepared_for_{selected_lease_id}"
-    default_prepared = lease_client_name(selected_lease)
-    if not str(st.session_state.get(prepared_key) or "").strip() and default_prepared:
-        st.session_state[prepared_key] = default_prepared
+    sync_prepared_for(
+        st.session_state,
+        lease_id=selected_lease_id,
+        client_name=lease_client_name(selected_lease),
+        value_key="abstract_prepared_for",
+        lease_key="abstract_prepared_lease_id",
+    )
     prepared_for = st.text_input(
         "Prepared for (client / customer)",
-        help="Defaults to the client name. Printed on the abstract cover.",
-        key=prepared_key,
+        help="Always the client on the selected lease. Switching leases replaces this name.",
+        key="abstract_prepared_for",
     )
 
     try:

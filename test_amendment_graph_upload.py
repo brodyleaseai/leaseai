@@ -9,6 +9,7 @@ from amendment_graph_helpers import (
     html_text,
     lease_client_name,
     lease_option_label,
+    sync_prepared_for,
 )
 
 
@@ -142,6 +143,42 @@ class HelperTests(unittest.TestCase):
             "Occupying Tenant LLC",
         )
         self.assertEqual(lease_client_name({}), "")
+
+    def test_prepared_for_follows_the_selected_lease_client(self):
+        session = {}
+        sync_prepared_for(
+            session,
+            lease_id="lease-a",
+            client_name="Acme Properties",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Acme Properties")
+        sync_prepared_for(
+            session,
+            lease_id="lease-b",
+            client_name="Northland Capital",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Northland Capital")
+        session["prepared_for"] = "Edited by hand"
+        sync_prepared_for(
+            session,
+            lease_id="lease-b",
+            client_name="Northland Capital",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Edited by hand")
+        sync_prepared_for(
+            session,
+            lease_id="lease-c",
+            client_name="",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "")
 
 
 class PageSourceTests(unittest.TestCase):
