@@ -478,6 +478,148 @@ class PdfTests(unittest.TestCase):
         self.assertNotIn("Rent Schedule", schedule_b)
         self.assertNotIn("9 months before the Expiry Date", schedule_b)
 
+    def test_third_amendment_updates_schedule_and_includes_precedence(self):
+        second_rent = (
+            "5. BASE RENT. From April 1, 2027 to March 31, 2035, Tenant shall pay annual Base Rent "
+            "for the entire Premises, currently comprising 13,500 rentable square feet, at the following "
+            "rates: April 1, 2027–March 31, 2028: $27.25 per rentable square foot per annum; "
+            "April 1, 2028–March 31, 2029: $28.07; April 1, 2029–March 31, 2030: $28.91; "
+            "April 1, 2030–March 31, 2031: $29.78; April 1, 2031–March 31, 2032: $30.67; "
+            "April 1, 2032–March 31, 2033: $31.59; April 1, 2033–March 31, 2034: $32.54; "
+            "and April 1, 2034–March 31, 2035: $33.52. The rates in this Section are fixed dollar rates "
+            "and replace, not supplement, any annual percentage escalation formula. No additional 3% "
+            "escalation shall be applied."
+        )
+        third_rent = (
+            "Base Rent shall be calculated using the then-applicable rate multiplied by 12,800 "
+            "rentable square feet. The applicable rate from April 1, 2028 to March 31, 2029 remains $28.07."
+        )
+        third_text = """
+7. ORDER OF PRECEDENCE
+If this Third Amendment conflicts with the Second Amendment, First Amendment, or original Lease, this Third Amendment
+governs to the extent of the conflict. The Second Amendment continues to govern the Base Rent rates and renewal notice period except as expressly modified by this Third Amendment. All other provisions remain in force.
+8. EXECUTION
+Executed as of the date first written above.
+"""
+        history = [
+            {
+                "clause_type": "Base Rent",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$24,000",
+                "is_current": False,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 2,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-2",
+                "clause_value": second_rent,
+                "is_current": False,
+                "effective_from": "2027-04-01",
+                "modification_type": "SUPERSEDES",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 3,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-3",
+                "clause_value": third_rent,
+                "is_current": True,
+                "effective_from": "2028-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "12,000 sq ft",
+                "is_current": False,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 3,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-3",
+                "clause_value": "the Premises shall comprise 12,800 rentable square feet.",
+                "is_current": True,
+                "effective_from": "2028-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Rent Schedule",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": (
+                    "Year 1 (April 1, 2025–March 31, 2026): $24.00/RSF/year = $24,000.00/month; "
+                    "Year 10 (April 1, 2034–March 31, 2035): $31.31/RSF/year = $31,310.00/month"
+                ),
+                "is_current": True,
+                "effective_from": "2025-04-01",
+            },
+        ]
+        amendments = [
+            {
+                "amendment_id": "amd-2",
+                "amendment_number": 2,
+                "amendment_date": "2027-02-12",
+                "status": "READY FOR REVIEW",
+                "modified_clauses": ["Base Rent"],
+            },
+            {
+                "amendment_id": "amd-3",
+                "amendment_number": 3,
+                "amendment_date": "2028-09-20",
+                "effective_date": "2028-10-01",
+                "status": "READY FOR REVIEW",
+                "modified_clauses": ["Base Rent", "Premises Description"],
+                "extracted_data": {"amendment_text": third_text},
+            },
+        ]
+        recorded = [
+            {
+                "amendment_id": "amd-3",
+                "clause_type": "Base Rent",
+                "modification_type": "MODIFIES",
+                "original_value": "$24,000",
+                "new_value": third_rent,
+                "effective_date": "2028-10-01",
+            },
+            {
+                "amendment_id": "amd-3",
+                "clause_type": "Premises Description",
+                "modification_type": "MODIFIES",
+                "original_value": "12,000 sq ft",
+                "new_value": "the Premises shall comprise 12,800 rentable square feet.",
+                "effective_date": "2028-10-01",
+            },
+        ]
+        model = build_amendment_resolution_model(
+            {
+                "property_address": "8800 Riverfront Dr, Richmond, BC",
+                "tenant_name": "Juniper Coast Analytics Inc.",
+            },
+            amendments,
+            history,
+            as_of="2026-11-05",
+            amendment_clauses=recorded,
+        )
+        changed = {clause["clause_type"]: clause for clause in model["changed_clauses"]}
+        self.assertIn("Rent Schedule", changed)
+        self.assertIn("$29,941.33/month", changed["Rent Schedule"]["governing_value"])
+        self.assertIn("$35,754.67/month", changed["Rent Schedule"]["governing_value"])
+        self.assertIn("12,800 RSF", changed["Rent Schedule"]["governing_value"])
+        self.assertNotIn("$31,310.00/month", changed["Rent Schedule"]["governing_value"])
+        self.assertIn("Order of Precedence", changed)
+        self.assertIn("Third Amendment governs", changed["Order of Precedence"]["governing_value"])
+        text = _pdf_text(model)
+        self.assertIn("$29,941.33", text)
+        self.assertIn("Order of Precedence", text)
+        self.assertNotIn("Executed as of the date first written", text)
+        self.assertNotIn("Rent Schedule", text.split("Schedule B")[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

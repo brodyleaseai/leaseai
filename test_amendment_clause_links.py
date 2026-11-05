@@ -9,6 +9,9 @@ from amendment_clause_links import (
     derive_rent_escalations,
     derive_rent_schedule,
     expand_related_modifications,
+    extract_order_of_precedence,
+    extract_structural_clauses,
+    is_execution_clause,
     parse_rate_periods,
     parse_rsf,
 )
@@ -123,6 +126,87 @@ class ModelCascadeTests(unittest.TestCase):
         self.assertTrue(by_type["Rent Escalations"]["changed"])
         self.assertIn("fixed dollar rates", by_type["Rent Escalations"]["governing_value"])
         self.assertFalse(by_type["CAM Charges"]["changed"])
+
+    def test_third_amendment_rebases_schedule_on_12800_rsf(self):
+        third_rent = (
+            "From and after October 1, 2028, Base Rent shall be calculated using the "
+            "then-applicable rate multiplied by 12,800 rentable square feet, rather than "
+            "13,500 rentable square feet. For clarity, the applicable rate from April 1, "
+            "2028 to March 31, 2029 remains $28.07 per rentable square foot per annum; "
+            "only the rentable area used in the calculation changes."
+        )
+        clauses = apply_related_clause_updates(
+            [
+                {
+                    "clause_type": "Base Rent",
+                    "changed": True,
+                    "original_value": "$24,000",
+                    "governing_value": third_rent,
+                    "governing_label": "Amendment No. 3 (2028-09-20)",
+                    "governing_amendment_number": 3,
+                    "effective_from": "2028-10-01",
+                    "versions": [
+                        {"clause_value": "$24,000"},
+                        {"clause_value": SECOND_AMENDMENT_RENT},
+                        {"clause_value": third_rent},
+                    ],
+                },
+                {
+                    "clause_type": "Premises Description",
+                    "changed": True,
+                    "original_value": "12,000 sq ft",
+                    "governing_value": "From and after the Surrender Effective Date, the Premises shall comprise 12,800 rentable square feet.",
+                    "governing_label": "Amendment No. 3 (2028-09-20)",
+                    "governing_amendment_number": 3,
+                    "effective_from": "2028-10-01",
+                },
+                {
+                    "clause_type": "Rent Schedule",
+                    "changed": True,
+                    "original_value": ORIGINAL_SCHEDULE,
+                    "governing_value": derive_rent_schedule(SECOND_AMENDMENT_RENT),
+                    "governing_label": "Amendment No. 2 (2027-02-12)",
+                    "governing_amendment_number": 2,
+                    "effective_from": "2027-04-01",
+                },
+                {
+                    "clause_type": "Rent Escalations",
+                    "changed": True,
+                    "original_value": "3%",
+                    "governing_value": "None — fixed dollar rates replace any percentage escalation",
+                    "governing_amendment_number": 2,
+                },
+            ]
+        )
+        schedule = next(clause for clause in clauses if clause["clause_type"] == "Rent Schedule")
+        self.assertIn("From October 1, 2028 on 12,800 RSF", schedule["governing_value"])
+        self.assertIn("$28.07/RSF/year = $29,941.33/month", schedule["governing_value"])
+        self.assertIn("$33.52/RSF/year = $35,754.67/month", schedule["governing_value"])
+        self.assertNotIn("$30,656.25/month", schedule["governing_value"])
+        self.assertNotIn("$24,000.00/month", schedule["governing_value"])
+        self.assertEqual(schedule["governing_amendment_number"], 3)
+
+
+class StructuralClauseTests(unittest.TestCase):
+    def test_extracts_order_of_precedence_and_skips_execution(self):
+        text = """
+7. ORDER OF PRECEDENCE
+If this Third Amendment conflicts with the Second Amendment, First Amendment, or original Lease, this Third Amendment
+governs to the extent of the conflict, but only from the applicable effective date stated herein. The Second Amendment
+continues to govern the Base Rent rates and renewal notice period except as expressly modified by this Third Amendment. All
+other provisions remain in force.
+8. EXECUTION
+Executed as of the date first written above.
+LANDLORD: NORTHSHORE MERIDIAN PROPERTIES LTD.
+"""
+        precedence = extract_order_of_precedence(text)
+        self.assertIn("this Third Amendment governs", precedence)
+        self.assertIn("Second Amendment continues to govern the Base Rent rates", precedence)
+        self.assertNotIn("LANDLORD", precedence)
+        extras = extract_structural_clauses(text, "2028-10-01")
+        self.assertEqual([row["clause_type"] for row in extras], ["Order of Precedence"])
+        self.assertTrue(is_execution_clause("Execution", "Executed as of the date first written above."))
+        self.assertFalse(is_execution_clause("Order of Precedence", extras[0]["new_value"]))
 
 
 if __name__ == "__main__":

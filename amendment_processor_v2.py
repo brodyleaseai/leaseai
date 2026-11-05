@@ -15,7 +15,11 @@ import json
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from extraction_pipeline import LeaseExtractionPipeline
-from amendment_clause_links import expand_related_modifications
+from amendment_clause_links import (
+    expand_related_modifications,
+    extract_structural_clauses,
+    is_execution_clause,
+)
 
 
 class AmendmentProcessorV2:
@@ -35,6 +39,7 @@ class AmendmentProcessorV2:
             "Additional Rent",
             "Percentage Rent",
             "Rent Escalations",
+            "Interest on Overdue Amounts",
             "Security Deposit",
             "Letter of Credit",
             
@@ -100,6 +105,7 @@ class AmendmentProcessorV2:
             "Alterations",
             "Restoration Obligations",
             "Surrender Conditions",
+            "Order of Precedence",
         ]
     
     def process_amendment(
@@ -155,6 +161,7 @@ class AmendmentProcessorV2:
             lease_data, 
             supabase_client
         )
+        extracted_fields["amendment_text"] = amendment_text
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
         # Step 5: Create amendment record
@@ -185,22 +192,38 @@ class AmendmentProcessorV2:
             extracted_fields, 
             effective_date
         )
+        clause_modifications = [
+            row
+            for row in clause_modifications
+            if not is_execution_clause(row.get("clause_type"), row.get("new_value") or "")
+        ]
+        present_types = {row["clause_type"] for row in clause_modifications}
+        for extra in extract_structural_clauses(amendment_text, effective_date):
+            if extra["clause_type"] not in present_types:
+                clause_modifications.append(extra)
+                present_types.add(extra["clause_type"])
         existing_originals = {}
+        history_texts = {}
         try:
             history = supabase_client.table("lease_clause_history").select(
-                "clause_type, clause_value"
-            ).eq("lease_id", lease_id).eq("is_current", True).execute()
-            existing_originals = {
-                row.get("clause_type"): row.get("clause_value")
-                for row in (history.data or [])
-                if row.get("clause_type")
-            }
+                "clause_type, clause_value, is_current"
+            ).eq("lease_id", lease_id).execute()
+            for row in history.data or []:
+                name = row.get("clause_type")
+                value = row.get("clause_value")
+                if not name or not value:
+                    continue
+                history_texts.setdefault(name, []).append(value)
+                if row.get("is_current"):
+                    existing_originals[name] = value
         except Exception:
             existing_originals = {}
+            history_texts = {}
         before_count = len(clause_modifications)
         clause_modifications = expand_related_modifications(
             clause_modifications,
             existing_originals,
+            history_texts=history_texts,
         )
         print(f"✓ Found {len(clause_modifications)} clause modification(s)")
         if len(clause_modifications) > before_count:
@@ -311,8 +334,10 @@ CRITICAL INSTRUCTIONS:
 - If the original value is not stated, write "Not stated - amendment only provides new value"
 - Be precise about dates, amounts, percentages, and legal terms
 - If Base Rent / Section 5 is replaced, also emit Rent Schedule (every year) and Rent Escalations (including when a % formula is removed)
-- If premises square footage changes, also emit Premises Description
+- If premises square footage changes, emit Premises Description and rebuild Rent Schedule at the new RSF using the still-governing dollar rates
 - If renewal notice timing changes, emit Renewal Notice Deadline (not only Renewal Options)
+- Extract Order of Precedence / Priority and Continuing Effect when present
+- Do NOT extract Execution, signature blocks, or “executed as of” closing language
 
 AMENDMENT DOCUMENT TEXT ({len(amendment_text_truncated):,} characters):
 ---

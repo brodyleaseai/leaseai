@@ -552,6 +552,22 @@ with tab5:
             )
         except Exception as e:
             st.error(f"Could not load recorded amendment clauses: {e}")
+        try:
+            full = (
+                sb.table("amendments")
+                .select("extracted_data, effective_date")
+                .eq("id", amendment_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if full:
+                amendment["extracted_data"] = full[0].get("extracted_data")
+                if full[0].get("effective_date") and not amendment.get("effective_date"):
+                    amendment["effective_date"] = full[0]["effective_date"]
+        except Exception:
+            pass
 
     report_model = build_amendment_resolution_model(
         selected_lease,

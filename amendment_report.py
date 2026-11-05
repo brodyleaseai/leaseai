@@ -32,7 +32,10 @@ from reportlab.platypus import (
 )
 
 import config
-from amendment_clause_links import apply_related_clause_updates
+from amendment_clause_links import (
+    apply_related_clause_updates,
+    extract_structural_clauses,
+)
 from lease_report import _header_footer
 
 VALUE_STATEMENT = (
@@ -294,6 +297,33 @@ def build_amendment_resolution_model(
                 "versions": versions,
             }
         )
+
+    for amendment in amendment_list:
+        extracted = amendment.get("extracted_data") or {}
+        text = ""
+        if isinstance(extracted, dict):
+            text = extracted.get("amendment_text") or ""
+            for mod in extracted.get("Clause_Modifications") or []:
+                if not isinstance(mod, dict):
+                    continue
+                if (mod.get("clause_type") or "") == "Order of Precedence":
+                    text = text or mod.get("new_value") or ""
+        for extra in extract_structural_clauses(
+            text or amendment.get("amendment_text") or "",
+            amendment.get("effective_date") or amendment.get("amendment_date"),
+        ):
+            extra_type = extra["clause_type"]
+            if extra_type in seen_types:
+                continue
+            clause_changes.setdefault(extra_type, {
+                "amendment_id": amendment.get("amendment_id") or amendment.get("id"),
+                "clause_type": extra_type,
+                "modification_type": extra.get("modification_type"),
+                "original_value": extra.get("original_value"),
+                "new_value": extra.get("new_value"),
+                "effective_date": extra.get("effective_date"),
+            })
+            modified_names.add(extra_type)
 
     for clause_type in sorted(modified_names - seen_types):
         recorded = clause_changes.get(clause_type) or {}
