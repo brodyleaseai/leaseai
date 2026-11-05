@@ -8,9 +8,11 @@ from asc842_amendment import (
     KIND_CONSIDERATION,
     KIND_PARTIAL_TERMINATION,
     MODE_REMEASUREMENT,
+    amendment_counts_by_lease,
     build_measurement,
     classify_modification,
     history_as_of,
+    load_amendment_bundle,
     resolution_as_of,
     run_amended_calculation,
 )
@@ -321,6 +323,96 @@ class RemeasurementTests(unittest.TestCase):
             29941.33,
             [row["payment"] for row in result["subsequent_results"]["liability_schedule"][:3]],
         )
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+
+class _Query:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def eq(self, column, value):
+        self.rows = [row for row in self.rows if str(row.get(column)) == str(value)]
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, count):
+        self.rows = self.rows[:count]
+        return self
+
+    def execute(self):
+        return _Resp(self.rows)
+
+
+class _Supabase:
+    def __init__(self, tables, rpc_error=None, rpc_rows=None):
+        self.tables = tables
+        self.rpc_error = rpc_error
+        self.rpc_rows = rpc_rows
+
+    def table(self, name):
+        return _Query(self.tables.get(name, []))
+
+    def rpc(self, name, params):
+        if self.rpc_error:
+            raise RuntimeError(self.rpc_error)
+        rows = list(self.rpc_rows or [])
+        lease_id = params.get("p_lease_id")
+        if lease_id:
+            rows = [row for row in rows if str(row.get("lease_id")) == str(lease_id)]
+        return _Query(rows)
+
+
+class BundleLoadTests(unittest.TestCase):
+    def test_falls_back_to_amendments_table_when_rpc_is_empty(self):
+        client = _Supabase(
+            tables={
+                "leases": [{"id": "lease-1", "tenant_name": "Tenant", "client_id": "c1"}],
+                "clients": [{"id": "c1", "name": "Riverfront Holdings"}],
+                "amendments": [
+                    {
+                        "id": "amd-3",
+                        "lease_id": "lease-1",
+                        "amendment_number": 3,
+                        "amendment_date": "2028-09-20",
+                        "effective_date": "2028-10-01",
+                        "status": "Active",
+                    }
+                ],
+                "amendment_clauses": [],
+                "lease_clause_history": [],
+            },
+            rpc_rows=[],
+        )
+        bundle = load_amendment_bundle(client, "lease-1")
+        self.assertEqual(len(bundle["amendments"]), 1)
+        self.assertEqual(bundle["amendments"][0]["amendment_id"], "amd-3")
+        self.assertEqual(bundle["lease"]["clients"]["name"], "Riverfront Holdings")
+        self.assertEqual(amendment_counts_by_lease(client)["lease-1"], 1)
+
+    def test_falls_back_when_rpc_raises(self):
+        client = _Supabase(
+            tables={
+                "leases": [{"id": "lease-1"}],
+                "amendments": [
+                    {"id": "amd-2", "lease_id": "lease-1", "amendment_number": 2}
+                ],
+                "amendment_clauses": [],
+                "lease_clause_history": [],
+            },
+            rpc_error="function get_amendment_chain does not exist",
+        )
+        bundle = load_amendment_bundle(client, "lease-1")
+        self.assertEqual(len(bundle["amendments"]), 1)
+        self.assertIn("get_amendment_chain", bundle["load_error"])
 
 
 if __name__ == "__main__":

@@ -31,11 +31,14 @@ except Exception:
         st.stop()
 
 from supabase import create_client
+from amendment_graph_helpers import lease_client_name, lease_option_label
 from auth_module import AuthManager
 from asc842_amendment import (
     MODE_COMMENCEMENT,
     MODE_REMEASUREMENT,
+    amendment_counts_by_lease,
     build_measurement,
+    enrich_lease_client,
     latest_amendment_date,
     load_amendment_bundle,
     public_measurement_preview,
@@ -76,6 +79,103 @@ st.title("📈 ASC 842 / IFRS 16 Compliance Engine")
 st.markdown("**Enterprise-Grade Lease Accounting Calculations & Reporting**")
 st.markdown("---")
 
+try:
+    leases_response = sb.table("leases").select(
+        "id, filename, property_address, tenant_name, client_id, clients(name, company_name)"
+    ).execute()
+    leases = leases_response.data or []
+except Exception:
+    leases_response = sb.table("leases").select(
+        "id, filename, property_address, tenant_name, client_id"
+    ).execute()
+    leases = leases_response.data or []
+
+amendment_counts = amendment_counts_by_lease(sb)
+leases.sort(
+    key=lambda item: (
+        -(amendment_counts.get(str(item.get("id")), 0)),
+        str(item.get("property_address") or ""),
+    )
+)
+lease_options = {
+    lease_option_label(item, amendment_counts.get(str(item.get("id")))): item
+    for item in leases
+}
+
+if not leases:
+    st.warning("No leases found. Upload a lease first.")
+    selected_lease = {}
+    selected_lease_id = ""
+    amendment_bundle = {"amendments": [], "history": [], "amendment_clauses": [], "lease": {}}
+    stored_amendments = []
+    measurement_mode = MODE_COMMENCEMENT
+    as_of_date = date.today()
+    revised_discount_rate = 5.0
+else:
+    selected_lease_label = st.selectbox(
+        "Select Lease",
+        list(lease_options.keys()),
+        key="asc842_selected_lease",
+    )
+    selected_lease = enrich_lease_client(sb, lease_options[selected_lease_label])
+    selected_lease_id = selected_lease["id"]
+    amendment_bundle = load_amendment_bundle(sb, selected_lease_id)
+    if amendment_bundle.get("lease"):
+        selected_lease = enrich_lease_client(sb, {**selected_lease, **amendment_bundle["lease"]})
+        amendment_bundle["lease"] = selected_lease
+    stored_amendments = amendment_bundle.get("amendments") or []
+    measurement_mode = MODE_COMMENCEMENT
+    as_of_date = date.today()
+    revised_discount_rate = 5.0
+
+    if amendment_bundle.get("load_error") and not stored_amendments:
+        st.warning(
+            "Could not load the amendment chain via the database function; "
+            f"fell back to the amendments table. {amendment_bundle['load_error']}"
+        )
+    if stored_amendments:
+        st.info(
+            f"This lease has **{len(stored_amendments)} amendment(s)** on file. "
+            "Choose **As amended** to remeasure from the Amendment Resolution Graph — "
+            "no restated lease PDF is required."
+        )
+    else:
+        st.caption(
+            "No amendments are linked to this exact lease id. If 8800 Riverfront was "
+            "processed more than once, pick the copy whose label includes an amendment count."
+        )
+    mode_label = st.radio(
+        "Measurement",
+        [
+            "At commencement (original lease)",
+            "As amended (modification accounting)",
+        ],
+        help=(
+            "As amended rolls the pre-modification liability and ROU asset to the "
+            "effective date, then remeasures remaining payments at the revised IBR. "
+            "A partial surrender also recognizes a proportionate gain or loss."
+        ),
+        key=f"asc842_measurement_mode_{selected_lease_id}",
+    )
+    measurement_mode = (
+        MODE_REMEASUREMENT
+        if mode_label.startswith("As amended")
+        else MODE_COMMENCEMENT
+    )
+    if measurement_mode == MODE_REMEASUREMENT:
+        default_as_of = parse_date(latest_amendment_date(stored_amendments))
+        as_of_date = st.date_input(
+            "Remeasure as of",
+            value=(default_as_of.date() if default_as_of else date.today()),
+            help="Usually the latest amendment effective date (for example October 1, 2028).",
+            key=f"asc842_as_of_{selected_lease_id}",
+        )
+        if not stored_amendments:
+            st.warning(
+                "As amended is selected, but this lease has no amendment rows. "
+                "The calculator will use the dates and rent you enter below as a fallback."
+            )
+
 # Tab navigation
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📋 New Calculation",
@@ -88,57 +188,9 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.subheader("Create New ASC 842 Compliance Calculation")
     
-    # Select lease
-    leases_response = sb.table("leases").select("id, filename, property_address, tenant_name, clients(name)").execute()
-    leases = leases_response.data or []
-    
-    if not leases:
+    if not selected_lease_id:
         st.warning("No leases found. Upload a lease first.")
     else:
-        lease_options = {
-            f"{l.get('property_address', l.get('filename', 'Unknown'))} - {l.get('tenant_name', 'Unknown')}": l['id']
-            for l in leases
-        }
-        
-        selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()))
-        selected_lease_id = lease_options[selected_lease_label]
-        amendment_bundle = load_amendment_bundle(sb, selected_lease_id)
-        stored_amendments = amendment_bundle.get("amendments") or []
-        measurement_mode = MODE_COMMENCEMENT
-        as_of_date = date.today()
-        revised_discount_rate = 5.0
-
-        if stored_amendments:
-            st.info(
-                f"This lease has **{len(stored_amendments)} amendment(s)** on file. "
-                "ASC 842 / IFRS 16 can measure the original lease at commencement or "
-                "remeasure from the amendment effective date. The Amendment Resolution "
-                "Graph supplies the governing rent schedule — no restated lease PDF is required."
-            )
-            mode_label = st.radio(
-                "Measurement",
-                [
-                    "At commencement (original lease)",
-                    "As amended (modification accounting)",
-                ],
-                help=(
-                    "As amended rolls the pre-modification liability and ROU asset to the "
-                    "effective date, then remeasures remaining payments at the revised IBR. "
-                    "A partial surrender also recognizes a proportionate gain or loss."
-                ),
-            )
-            measurement_mode = (
-                MODE_REMEASUREMENT
-                if mode_label.startswith("As amended")
-                else MODE_COMMENCEMENT
-            )
-            if measurement_mode == MODE_REMEASUREMENT:
-                default_as_of = parse_date(latest_amendment_date(stored_amendments))
-                as_of_date = st.date_input(
-                    "Remeasure as of",
-                    value=(default_as_of.date() if default_as_of else date.today()),
-                    help="Usually the latest amendment effective date (for example October 1, 2028).",
-                )
         
         st.markdown("---")
         st.markdown("### Lease Parameters")
@@ -665,7 +717,25 @@ with tab3:
 
 with tab4:
     st.subheader("📄 Generate Compliance Reports")
-    
+
+    if selected_lease_id:
+        report_client = lease_client_name(selected_lease)
+        prepared_key = f"asc842_report_prepared_for_{selected_lease_id}"
+        if not str(st.session_state.get(prepared_key) or "").strip() and report_client:
+            st.session_state[prepared_key] = report_client
+        prepared_for = st.text_input(
+            "Prepared for (client / customer)",
+            key=prepared_key,
+            help="Defaults to the client name on the selected lease. Printed on the report cover.",
+        )
+        if report_client:
+            st.caption(f"Selected lease client: {report_client}")
+        elif not prepared_for:
+            st.caption("No client name is stored on this lease. Enter the customer name above.")
+    else:
+        prepared_for = ""
+        st.warning("Select a lease at the top of the page first.")
+
     st.info(
         "Run a calculation on the New Calculation tab, including **As amended** "
         "when the lease has an amendment chain. Download the liability and ROU "

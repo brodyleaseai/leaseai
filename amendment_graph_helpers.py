@@ -7,7 +7,7 @@ by query-engine empty-state handling or by lease text that contains `{` / HTML.
 from __future__ import annotations
 
 import html
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 
 def html_text(value) -> str:
@@ -35,10 +35,37 @@ def clause_types_from_history(rows: Optional[Iterable[dict]]) -> List[str]:
     return sorted(types)
 
 
-def lease_option_label(lease: dict) -> str:
+def nested_client(lease: Optional[dict]) -> Dict[str, Any]:
+    clients = (lease or {}).get("clients")
+    if isinstance(clients, list) and clients:
+        clients = clients[0]
+    return clients if isinstance(clients, dict) else {}
+
+
+def lease_client_name(lease: Optional[dict]) -> str:
+    """Client / customer name for Prepared-for fields. Prefer the clients row."""
+    lease = lease or {}
+    client = nested_client(lease)
+    for value in (
+        client.get("name"),
+        client.get("company_name"),
+        lease.get("client_name"),
+        lease.get("tenant_name"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def lease_option_label(lease: dict, amendment_count: Optional[int] = None) -> str:
     """Stable unique selectbox label so two leases cannot collapse into one option."""
     address = str(lease.get("property_address") or "Unknown property").strip()
-    tenant = str(lease.get("tenant_name") or "Unknown tenant").strip()
+    tenant = str(lease.get("tenant_name") or lease_client_name(lease) or "Unknown tenant").strip()
     lease_id = str(lease.get("id") or "")
-    suffix = f" · {lease_id[:8]}" if lease_id else ""
-    return f"{address} — {tenant}{suffix}"
+    parts = [f"{address} — {tenant}"]
+    if amendment_count:
+        parts.append(f"{amendment_count} amendment{'s' if amendment_count != 1 else ''}")
+    if lease_id:
+        parts.append(lease_id[:8])
+    return " · ".join(parts)

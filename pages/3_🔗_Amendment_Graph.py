@@ -9,7 +9,13 @@ import sys
 from datetime import datetime, date
 from supabase import create_client
 import config
-from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
+from amendment_graph_helpers import (
+    clause_types_from_history,
+    html_text,
+    lease_client_name,
+    lease_option_label,
+)
+from asc842_amendment import enrich_lease_client
 from amendment_report import (
     abstract_filename,
     build_amendment_resolution_model,
@@ -189,7 +195,7 @@ with st.sidebar:
     # Get all leases with amendments
     try:
         leases_response = sb.table("leases").select(
-            "id, property_address, tenant_name, filename, client_id"
+            "id, property_address, tenant_name, filename, client_id, clients(name, company_name)"
         ).execute()
         leases = leases_response.data or []
     except Exception:
@@ -211,7 +217,10 @@ with st.sidebar:
     )
     
     selected_lease_id = lease_options[selected_lease_label]
-    selected_lease = next((lease for lease in leases if lease.get("id") == selected_lease_id), {})
+    selected_lease = enrich_lease_client(
+        sb,
+        next((lease for lease in leases if lease.get("id") == selected_lease_id), {}),
+    )
     
     st.markdown("---")
     st.markdown("### 🔍 Query Date")
@@ -509,11 +518,14 @@ with tab5:
     )
     st.markdown("---")
 
+    prepared_key = f"abstract_prepared_for_{selected_lease_id}"
+    default_prepared = lease_client_name(selected_lease)
+    if not str(st.session_state.get(prepared_key) or "").strip() and default_prepared:
+        st.session_state[prepared_key] = default_prepared
     prepared_for = st.text_input(
         "Prepared for (client / customer)",
-        value=selected_lease.get("tenant_name") or "",
-        help="Name printed on the abstract cover.",
-        key=f"abstract_prepared_for_{selected_lease_id}",
+        help="Defaults to the client name. Printed on the abstract cover.",
+        key=prepared_key,
     )
 
     try:

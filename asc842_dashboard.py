@@ -80,14 +80,14 @@ def render_new_calculation_tab(supabase, auth):
                 f"{len(stored_amendments)} amendment(s) on file. "
                 "Choose as-amended to remeasure from the Resolution Graph — no restated PDF."
             )
-            mode_label = st.radio(
-                "Measurement",
-                ["At commencement (original lease)", "As amended (modification accounting)"],
-            )
-            measurement_mode = (
-                MODE_REMEASUREMENT if mode_label.startswith("As amended") else MODE_COMMENCEMENT
-            )
-            if measurement_mode == MODE_REMEASUREMENT:
+        mode_label = st.radio(
+            "Measurement",
+            ["At commencement (original lease)", "As amended (modification accounting)"],
+        )
+        measurement_mode = (
+            MODE_REMEASUREMENT if mode_label.startswith("As amended") else MODE_COMMENCEMENT
+        )
+        if measurement_mode == MODE_REMEASUREMENT:
                 default_as_of = parse_date(latest_amendment_date(stored_amendments))
                 as_of_date = st.date_input(
                     "Remeasure as of",

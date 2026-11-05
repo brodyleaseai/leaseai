@@ -13,6 +13,7 @@ from datetime import timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from amendment_clause_links import parse_rsf
+from amendment_graph_helpers import lease_client_name
 from amendment_report import build_amendment_resolution_model
 from asc842_cashflows import (
     escalate_flat_payments,
@@ -526,19 +527,94 @@ def latest_amendment_date(amendments: Optional[Iterable[dict]]) -> Optional[str]
     return max(dates) if dates else None
 
 
+def amendment_counts_by_lease(supabase) -> Dict[str, int]:
+    """How many amendment rows each lease has, for selectbox labels."""
+    try:
+        rows = supabase.table("amendments").select("lease_id").execute().data or []
+    except Exception:
+        return {}
+    counts: Dict[str, int] = {}
+    for row in rows:
+        lease_id = str(row.get("lease_id") or "")
+        if lease_id:
+            counts[lease_id] = counts.get(lease_id, 0) + 1
+    return counts
+
+
+def enrich_lease_client(supabase, lease: Optional[dict]) -> Dict[str, Any]:
+    """Attach clients.name when the lease query did not join it."""
+    lease = dict(lease or {})
+    client = lease.get("clients")
+    if isinstance(client, list) and client:
+        client = client[0]
+    if isinstance(client, dict) and (client.get("name") or client.get("company_name")):
+        return lease
+    client_id = lease.get("client_id")
+    if not client_id:
+        return lease
+    try:
+        rows = (
+            supabase.table("clients")
+            .select("name, company_name")
+            .eq("id", client_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if rows:
+            lease["clients"] = rows[0]
+    except Exception:
+        pass
+    return lease
+
+
+def _normalize_amendment_row(row: dict) -> dict:
+    normalized = dict(row or {})
+    if not normalized.get("amendment_id") and normalized.get("id"):
+        normalized["amendment_id"] = normalized["id"]
+    return normalized
+
+
+def _amendments_from_table(supabase, lease_id: str) -> List[dict]:
+    rows = (
+        supabase.table("amendments")
+        .select("id, lease_id, amendment_number, amendment_date, effective_date, status, extracted_data")
+        .eq("lease_id", lease_id)
+        .order("amendment_number")
+        .execute()
+        .data
+        or []
+    )
+    return [_normalize_amendment_row(row) for row in rows]
+
+
 def load_amendment_bundle(supabase, lease_id: str) -> Dict[str, Any]:
     """Load the resolution-graph inputs for one lease. Missing tables stay empty."""
+    load_error = None
     lease = {}
     try:
         rows = supabase.table("leases").select("*").eq("id", lease_id).limit(1).execute().data or []
-        lease = rows[0] if rows else {}
-    except Exception:
+        lease = enrich_lease_client(supabase, rows[0] if rows else {})
+    except Exception as exc:
         lease = {}
+        load_error = str(exc)
     amendments: List[dict] = []
     try:
-        amendments = supabase.rpc("get_amendment_chain", {"p_lease_id": lease_id}).execute().data or []
-    except Exception:
+        amendments = [
+            _normalize_amendment_row(row)
+            for row in (
+                supabase.rpc("get_amendment_chain", {"p_lease_id": lease_id}).execute().data or []
+            )
+        ]
+    except Exception as exc:
+        load_error = str(exc)
         amendments = []
+    if not amendments:
+        try:
+            amendments = _amendments_from_table(supabase, lease_id)
+        except Exception as exc:
+            load_error = load_error or str(exc)
     history: List[dict] = []
     try:
         history = (
@@ -584,6 +660,7 @@ def load_amendment_bundle(supabase, lease_id: str) -> Dict[str, Any]:
         "amendments": amendments,
         "history": history,
         "amendment_clauses": clauses,
+        "load_error": load_error,
     }
 
 
