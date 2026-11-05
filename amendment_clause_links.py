@@ -46,6 +46,17 @@ RSF = re.compile(
     r"(\d{1,3}(?:,\d{3})+|\d+)\s+(?:rentable square feet|rsf|sq\.?\s*ft|square feet)",
     re.IGNORECASE,
 )
+REMAINING_RSF = re.compile(
+    r"(?:comprise[s]?|comprising|multiplied by|total(?:ling)?|"
+    r"premises (?:shall be|are|is))\s+(?:approximately\s+)?"
+    r"(\d{1,3}(?:,\d{3})+|\d+)\s+(?:rentable square feet|rsf|sq\.?\s*ft|square feet)",
+    re.IGNORECASE,
+)
+SURRENDER_RSF = re.compile(
+    r"(?:surrender|return of|surrendered area)\b.{0,120}?"
+    r"(\d{1,3}(?:,\d{3})+|\d+)\s+(?:rentable square feet|rsf|sq\.?\s*ft|square feet)",
+    re.IGNORECASE | re.DOTALL,
+)
 WORD_MONTHS = {
     "nine": 9,
     "twelve": 12,
@@ -56,14 +67,33 @@ WORD_MONTHS = {
 }
 
 
-def parse_rsf(text: str) -> Optional[int]:
-    match = RSF.search(text or "")
-    if not match:
-        return None
+def _as_rsf(value: str) -> Optional[int]:
     try:
-        return int(match.group(1).replace(",", ""))
+        return int(value.replace(",", ""))
     except ValueError:
         return None
+
+
+def parse_rsf(text: str) -> Optional[int]:
+    """Return the remaining / billed premises RSF, not a surrendered slice."""
+    remaining = [
+        _as_rsf(match.group(1))
+        for match in REMAINING_RSF.finditer(text or "")
+    ]
+    remaining = [value for value in remaining if value]
+    if remaining:
+        return remaining[-1]
+    surrendered = {
+        _as_rsf(match.group(1))
+        for match in SURRENDER_RSF.finditer(text or "")
+    }
+    surrendered.discard(None)
+    found = [_as_rsf(match.group(1)) for match in RSF.finditer(text or "")]
+    found = [value for value in found if value]
+    kept = [value for value in found if value not in surrendered]
+    if kept:
+        return kept[-1]
+    return max(found) if found else None
 
 
 def parse_rate_periods(text: str) -> List[Dict[str, Any]]:
@@ -421,7 +451,7 @@ def _latest_rsf_parent(clauses: List[dict]) -> Tuple[Optional[int], Optional[dic
             candidates.append((clause.get("governing_amendment_number") or 0, rsf, clause))
     if not candidates:
         return None, None
-    candidates.sort(key=lambda item: item[0])
+    candidates.sort(key=lambda item: (item[0], item[1]))
     _, rsf, parent = candidates[-1]
     return rsf, parent
 
@@ -497,4 +527,11 @@ def apply_related_clause_updates(clauses: Iterable[dict]) -> List[dict]:
         current_rsf = implied_schedule_rsf(current.get("governing_value") or "") if current else None
         if schedule and current_rsf != latest_rsf:
             _apply_dependent(by_type, updated, rsf_parent, "Rent Schedule", schedule)
+        escalations = by_type.get("Rent Escalations")
+        if escalations and not escalations.get("changed"):
+            for text in context:
+                derived = derive_rent_escalations(text)
+                if derived and "fixed dollar" in derived:
+                    _apply_dependent(by_type, updated, rsf_parent, "Rent Escalations", derived)
+                    break
     return updated

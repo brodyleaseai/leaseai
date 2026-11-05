@@ -57,6 +57,11 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(derive_rent_escalations(SECOND_AMENDMENT_RENT), "None — fixed dollar rates replace any percentage escalation")
         self.assertEqual(derive_premises_description(SECOND_AMENDMENT_RENT), "13,500 sq ft")
         self.assertEqual(derive_renewal_notice(NOTICE_TEXT), "12 months before the Expiry Date")
+        surrender = (
+            "surrender the return of 700 rentable square feet. "
+            "the Premises shall comprise 12,800 rentable square feet."
+        )
+        self.assertEqual(parse_rsf(surrender), 12800)
 
 
 class ExpandTests(unittest.TestCase):
@@ -185,6 +190,63 @@ class ModelCascadeTests(unittest.TestCase):
         self.assertNotIn("$30,656.25/month", schedule["governing_value"])
         self.assertNotIn("$24,000.00/month", schedule["governing_value"])
         self.assertEqual(schedule["governing_amendment_number"], 3)
+
+    def test_uses_remaining_12800_rsf_not_surrendered_700(self):
+        premises = (
+            "Effective October 1, 2028 (the “Surrender Effective Date”), Tenant shall surrender "
+            "and Landlord shall accept the return of 700 rentable square feet at the eastern end "
+            "of the Expansion Area (the “Surrendered Area”). From and after the Surrender "
+            "Effective Date, the Premises shall comprise 12,800 rentable square feet."
+        )
+        third_rent = (
+            "Notwithstanding the per-square-foot rates in the replacement Section 5 inserted by "
+            "the Second Amendment, from and after October 1, 2028, Base Rent shall be calculated "
+            "using the then-applicable rate multiplied by 12,800 rentable square feet, rather than "
+            "13,500 rentable square feet. For clarity, the applicable rate from April 1, 2028 to "
+            "March 31, 2029 remains $28.07 per rentable square foot per annum."
+        )
+        self.assertEqual(parse_rsf(premises), 12800)
+        self.assertNotEqual(parse_rsf(premises), 700)
+        clauses = apply_related_clause_updates(
+            [
+                {
+                    "clause_type": "Base Rent",
+                    "changed": True,
+                    "original_value": "$24,000",
+                    "governing_value": third_rent,
+                    "governing_label": "Amendment No. 3 (2028-09-20)",
+                    "governing_amendment_number": 3,
+                    "effective_from": "2028-10-01",
+                    "versions": [
+                        {"clause_value": SECOND_AMENDMENT_RENT},
+                        {"clause_value": third_rent},
+                    ],
+                },
+                {
+                    "clause_type": "Premises Description",
+                    "changed": True,
+                    "original_value": "12,000 sq ft",
+                    "governing_value": premises,
+                    "governing_label": "Amendment No. 3 (2028-09-20)",
+                    "governing_amendment_number": 3,
+                    "effective_from": "2028-10-01",
+                },
+                {
+                    "clause_type": "Rent Schedule",
+                    "changed": True,
+                    "original_value": ORIGINAL_SCHEDULE,
+                    "governing_value": "From October 1, 2028 on 700 RSF: Year 1 (October 1, 2028–March 31, 2029): $28.07/RSF/year = $1,637.42/month",
+                    "governing_amendment_number": 3,
+                    "effective_from": "2028-10-01",
+                },
+            ]
+        )
+        schedule = next(clause for clause in clauses if clause["clause_type"] == "Rent Schedule")
+        self.assertIn("12,800 RSF", schedule["governing_value"])
+        self.assertIn("$29,941.33/month", schedule["governing_value"])
+        self.assertIn("$35,754.67/month", schedule["governing_value"])
+        self.assertNotIn("700 RSF", schedule["governing_value"])
+        self.assertNotIn("$1,637.42", schedule["governing_value"])
 
 
 class StructuralClauseTests(unittest.TestCase):
