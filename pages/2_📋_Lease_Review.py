@@ -23,6 +23,8 @@ except Exception:
         st.stop()
 
 from supabase import create_client
+from report_sources import fields_from_review_rows
+
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
@@ -283,13 +285,7 @@ if page == "📋 Lease Dashboard":
                         fields_data = fields_response.data or []
                         
                         # Convert to dict format
-                        extracted_dict = {}
-                        for field in fields_data:
-                            field_name = field.get("field_name", "Unknown")
-                            extracted_dict[field_name] = {
-                                "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                                "confidence": field.get("confidence", "MEDIUM")
-                            }
+                        extracted_dict = fields_from_review_rows(fields_data)
                         all_extracted.append(extracted_dict)
                     
                     # Generate consolidated CSV
@@ -334,13 +330,7 @@ if page == "📋 Lease Dashboard":
                         fields_data = fields_response.data or []
                         
                         # Convert to dict format
-                        extracted_dict = {}
-                        for field in fields_data:
-                            field_name = field.get("field_name", "Unknown")
-                            extracted_dict[field_name] = {
-                                "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                                "confidence": field.get("confidence", "MEDIUM")
-                            }
+                        extracted_dict = fields_from_review_rows(fields_data)
                         all_extracted.append(extracted_dict)
                         
                         # Fetch ASC 842 data if available
@@ -501,13 +491,7 @@ elif page == "🔍 Review a Lease":
                 from lease_report import generate_lease_abstract_pdf
                 
                 # Prepare extracted fields dictionary
-                extracted_dict = {}
-                for field in fields:
-                    field_name = field.get("field_name", "Unknown")
-                    extracted_dict[field_name] = {
-                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
-                    }
+                extracted_dict = fields_from_review_rows(fields)
                 
                 # Generate PDF
                 pdf_bytes = generate_lease_abstract_pdf(lease, extracted_dict)
@@ -559,13 +543,7 @@ elif page == "🔍 Review a Lease":
                 from pms_export import export_to_yardi
                 
                 # Prepare extracted fields dictionary
-                extracted_dict = {}
-                for field in fields:
-                    field_name = field.get("field_name", "Unknown")
-                    extracted_dict[field_name] = {
-                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
-                    }
+                extracted_dict = fields_from_review_rows(fields)
                 
                 # Generate Yardi CSV
                 csv_bytes = export_to_yardi(lease, extracted_dict)
@@ -602,13 +580,7 @@ elif page == "🔍 Review a Lease":
                 from pms_export import export_to_mri
                 
                 # Prepare extracted fields dictionary
-                extracted_dict = {}
-                for field in fields:
-                    field_name = field.get("field_name", "Unknown")
-                    extracted_dict[field_name] = {
-                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
-                    }
+                extracted_dict = fields_from_review_rows(fields)
                 
                 # Generate MRI CSV
                 csv_bytes = export_to_mri(lease, extracted_dict)
@@ -645,13 +617,7 @@ elif page == "🔍 Review a Lease":
                 from generic_export import export_lease_to_csv
                 
                 # Prepare extracted fields dictionary
-                extracted_dict = {}
-                for field in fields:
-                    field_name = field.get("field_name", "Unknown")
-                    extracted_dict[field_name] = {
-                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
-                    }
+                extracted_dict = fields_from_review_rows(fields)
                 
                 # Generate Generic CSV
                 csv_bytes = export_lease_to_csv(lease, extracted_dict)
@@ -688,13 +654,7 @@ elif page == "🔍 Review a Lease":
                 from generic_export import export_lease_to_excel
                 
                 # Prepare extracted fields dictionary
-                extracted_dict = {}
-                for field in fields:
-                    field_name = field.get("field_name", "Unknown")
-                    extracted_dict[field_name] = {
-                        "value": field.get("reviewed_value") or field.get("raw_value") or "NOT FOUND",
-                        "confidence": field.get("confidence", "MEDIUM")
-                    }
+                extracted_dict = fields_from_review_rows(fields)
                 
                 # Fetch ASC 842 calculations if available
                 asc842_data = None

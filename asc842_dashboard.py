@@ -210,6 +210,8 @@ def render_new_calculation_tab(supabase, auth):
                             f"{preview.get('kind')} as of {preview.get('modification_date')}. "
                             f"First remaining payment ${preview.get('first_revised_monthly') or 0:,.2f}."
                         )
+                        if preview.get("governing_source"):
+                            st.caption(preview["governing_source"])
                         if not measurement.get("revised_payments"):
                             raise ValueError(
                                 "Could not build a governing payment schedule from the amendment graph."

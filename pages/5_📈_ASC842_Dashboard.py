@@ -304,9 +304,13 @@ with tab1:
             p4.metric("Remaining months", preview.get("revised_payment_count") or 0)
             if preview.get("amendments"):
                 st.caption("Applied: " + " · ".join(preview["amendments"]))
+            if preview.get("governing_source"):
+                st.caption(preview["governing_source"])
             if preview.get("governing_schedule"):
                 with st.expander("Governing rent schedule used for the remeasurement"):
                     st.write(preview["governing_schedule"])
+                    if preview.get("governing_source"):
+                        st.caption("Source: " + preview["governing_source"])
         
         st.markdown("---")
         

@@ -22,6 +22,7 @@ from amendment_report import (
     build_amendment_resolution_model,
     generate_amendment_resolution_pdf,
 )
+from report_sources import clause_source, format_source_line
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -617,8 +618,10 @@ with tab5:
                 st.markdown(f"**Changed:** {clause.get('change_summary')}")
                 st.markdown("**Original lease**")
                 st.write(clause["original_value"])
+                st.caption(format_source_line(clause_source(clause, "original")))
                 st.markdown(f"**Now governed by {clause.get('governing_label')}**")
                 st.write(clause["governing_value"])
+                st.caption(format_source_line(clause_source(clause, "governing")))
     else:
         st.info("No clause has been superseded yet. The original lease language still governs.")
 
@@ -630,6 +633,7 @@ with tab5:
             for clause in report_model["unchanged_clauses"]:
                 st.markdown(f"**{clause['clause_type']}**")
                 st.write(clause["governing_value"])
+                st.caption(format_source_line(clause_source(clause, "governing")))
 
     try:
         report_pdf = generate_amendment_resolution_pdf(report_model)

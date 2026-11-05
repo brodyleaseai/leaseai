@@ -13,6 +13,7 @@ from asc842_amendment import (
     classify_modification,
     history_as_of,
     load_amendment_bundle,
+    public_measurement_preview,
     resolution_as_of,
     run_amended_calculation,
 )
@@ -287,6 +288,10 @@ class RemeasurementTests(unittest.TestCase):
         classified = measurement["classification"]
         self.assertEqual(classified["kind"], KIND_PARTIAL_TERMINATION)
         self.assertEqual(classified["governing_rsf"], 12800)
+        self.assertTrue(classified.get("governing_source"))
+        self.assertIn("Amendment", classified["governing_source"])
+        preview = public_measurement_preview(measurement)
+        self.assertEqual(preview["governing_source"], classified["governing_source"])
         self.assertEqual(measurement["revised_payments"][0]["amount"], 29941.33)
         self.assertEqual(len(measurement["revised_payments"]), 78)
         self.assertLess(measurement["first_original_monthly"], measurement["first_revised_monthly"])

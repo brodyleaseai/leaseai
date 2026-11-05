@@ -20,6 +20,7 @@ from amendment_clause_links import (
     extract_structural_clauses,
     is_execution_clause,
 )
+from report_sources import with_page_prefix
 
 
 class AmendmentProcessorV2:
@@ -377,7 +378,8 @@ Return a JSON object with these fields:
       "section": "Section 4.1",
       "original_value": "Full text of original clause value",
       "new_value": "Full text of new clause value",
-      "source_snippet": "Relevant excerpt from amendment (first 300 chars)",
+      "source_snippet": "Verbatim excerpt from the amendment, including the nearby heading if present (first 300 chars)",
+      "source_page": "page number if visible in the amendment text, otherwise omit",
       "confidence": "HIGH|MEDIUM|LOW",
       "notes": "Brief explanation of the change"
     }},
@@ -472,7 +474,10 @@ RETURN ONLY THE JSON OBJECT. No additional text or explanation.
                 "modification_type": mod.get("modification_type", "MODIFIES"),
                 "original_value": mod.get("original_value", ""),
                 "new_value": mod.get("new_value", ""),
-                "source_text": mod.get("source_snippet", "")[:1000],
+                "source_text": with_page_prefix(
+                    mod.get("source_snippet", ""),
+                    mod.get("source_page"),
+                )[:1000],
                 "confidence": mod.get("confidence", "MEDIUM"),
                 "effective_date": effective_date,
             }

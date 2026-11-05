@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from amendment_clause_links import parse_rsf
 from amendment_graph_helpers import lease_client_name
 from amendment_report import build_amendment_resolution_model
+from report_sources import clause_source, format_source_line
 from asc842_cashflows import (
     escalate_flat_payments,
     first_monthly,
@@ -219,6 +220,9 @@ def classify_modification(
         elif amendments:
             kind = KIND_CONSIDERATION
 
+    clauses = clause_map(current)
+    cite_clause = clauses.get("Rent Schedule") or clauses.get("Base Rent")
+    cite = clause_source(cite_clause, "governing") if cite_clause else {}
     return {
         "kind": kind,
         "modification_date": modification_date,
@@ -229,6 +233,9 @@ def classify_modification(
         "surrendered_rsf": (prior_rsf - current_rsf) if prior_rsf and current_rsf and current_rsf < prior_rsf else 0,
         "prior_schedule": prior_rent,
         "governing_schedule": current_rent,
+        "governing_source": format_source_line(cite) if cite_clause else "",
+        "governing_source_document": cite.get("document") or "",
+        "governing_source_excerpt": cite.get("excerpt") or "",
         "is_modification": kind not in {KIND_INITIAL, KIND_NONE} or bool(amendments),
     }
 
@@ -690,5 +697,8 @@ def public_measurement_preview(measurement: Dict[str, Any]) -> Dict[str, Any]:
         "first_revised_monthly": measurement.get("first_revised_monthly"),
         "revised_payment_count": len(revised),
         "governing_schedule": classification.get("governing_schedule"),
+        "governing_source": classification.get("governing_source"),
+        "governing_source_document": classification.get("governing_source_document"),
+        "governing_source_excerpt": classification.get("governing_source_excerpt"),
         "is_modification": classification.get("is_modification"),
     }
