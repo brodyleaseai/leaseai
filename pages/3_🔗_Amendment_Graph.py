@@ -136,6 +136,7 @@ def process_amendment_upload(uploaded_file, lease_id: str) -> None:
             )
             st.success("✅ Amendment processed successfully!")
             st.success(f"Amendment ID: {amendment_id}")
+            st.caption("If this amendment number was already on the lease, the previous extract was replaced.")
             st.markdown("### 📊 Extraction Results")
             st.json(extracted_fields)
             st.info("💡 Go to the **Amendment Chain** tab to see the updated amendment chain!")

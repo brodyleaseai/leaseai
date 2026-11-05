@@ -182,9 +182,16 @@ class AmendmentProcessorV2:
             "created_at": datetime.utcnow().isoformat(),
         }
         
-        amendment_response = supabase_client.table("amendments").insert(amendment_data).execute()
-        amendment_id = amendment_response.data[0]["id"]
-        print(f"✓ Amendment #{amendment_number} created: {amendment_id}")
+        amendment_id, replaced = self._save_amendment_record(
+            lease_id,
+            amendment_number,
+            amendment_data,
+            supabase_client,
+        )
+        if replaced:
+            print(f"✓ Amendment #{amendment_number} already existed — replaced {amendment_id}")
+        else:
+            print(f"✓ Amendment #{amendment_number} created: {amendment_id}")
         
         # Step 6: Parse and save clause modifications
         print(f"\n[6/8] Analyzing clause modifications...")
@@ -531,6 +538,68 @@ RETURN ONLY THE JSON OBJECT. No additional text or explanation.
             
             supabase_client.table("lease_clause_history").insert(history_record).execute()
             print(f"   ✓ {clause_type}: v{max_version} → v{new_version}")
+
+    def _save_amendment_record(
+        self,
+        lease_id: str,
+        amendment_number: int,
+        amendment_data: Dict,
+        supabase_client,
+    ) -> Tuple[str, bool]:
+        """Insert a new amendment, or replace the existing one for this number."""
+        existing = (
+            supabase_client.table("amendments")
+            .select("id")
+            .eq("lease_id", lease_id)
+            .eq("amendment_number", amendment_number)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            amendment_id = existing.data[0]["id"]
+            self._clear_prior_extraction(lease_id, amendment_id, supabase_client)
+            update_data = {key: value for key, value in amendment_data.items() if key != "created_at"}
+            update_data["updated_at"] = datetime.utcnow().isoformat()
+            supabase_client.table("amendments").update(update_data).eq("id", amendment_id).execute()
+            return amendment_id, True
+
+        response = supabase_client.table("amendments").insert(amendment_data).execute()
+        return response.data[0]["id"], False
+
+    def _clear_prior_extraction(self, lease_id: str, amendment_id: str, supabase_client) -> None:
+        """Remove the last extract for this amendment so a re-process can rewrite it."""
+        prior_history = (
+            supabase_client.table("lease_clause_history")
+            .select("clause_type")
+            .eq("lease_id", lease_id)
+            .eq("source_document_id", amendment_id)
+            .execute()
+        )
+        affected = {
+            row.get("clause_type")
+            for row in (prior_history.data or [])
+            if row.get("clause_type")
+        }
+        supabase_client.table("amendment_clauses").delete().eq(
+            "amendment_id", amendment_id
+        ).execute()
+        supabase_client.table("lease_clause_history").delete().eq(
+            "lease_id", lease_id
+        ).eq("source_document_id", amendment_id).execute()
+        for clause_type in affected:
+            remaining = (
+                supabase_client.table("lease_clause_history")
+                .select("id, version_number")
+                .eq("lease_id", lease_id)
+                .eq("clause_type", clause_type)
+                .order("version_number", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if remaining.data:
+                supabase_client.table("lease_clause_history").update(
+                    {"is_current": True, "effective_to": None}
+                ).eq("id", remaining.data[0]["id"]).execute()
     
     def _parse_amendment_number(self, field_data) -> int:
         """Parse amendment number from field data."""
