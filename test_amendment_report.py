@@ -34,6 +34,7 @@ HISTORY = [
         "source_document_type": "AMENDMENT",
         "source_document_id": "amd-1",
         "clause_value": "$9,000.00 per month",
+        "source_text": "Page 3. Tenant shall pay monthly Base Rent of $9,000.00.",
         "is_current": True,
         "effective_from": "2024-06-01",
         "modification_type": "MODIFIES",
@@ -74,6 +75,11 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(rent["governing_label"], "Amendment No. 1 (2024-06-01)")
         self.assertEqual(rent["change_summary"], "$8,550.08 → $9,000.00")
         self.assertEqual(rent["change_number"], 1)
+        self.assertEqual(rent["original_source_text"], "$8,550.08 per month")
+        self.assertEqual(
+            rent["governing_source_text"],
+            "Page 3. Tenant shall pay monthly Base Rent of $9,000.00.",
+        )
         value = model["value"]
         self.assertEqual(value["deliverable_name"], "Amendment Resolution Abstract")
         self.assertEqual(value["amendments_resolved"], 1)
@@ -304,6 +310,9 @@ class PdfTests(unittest.TestCase):
         self.assertIn("1. Base Rent", text)
         self.assertIn("Original lease", text)
         self.assertIn("Now governed by Amendment No. 1", text)
+        self.assertIn("Source Exhibit", text)
+        self.assertIn("Source:", text)
+        self.assertIn("Page 3", text)
         self.assertIn("Exhibit A", text)
         self.assertIn("still governed by the original lease", text.lower())
         self.assertIn("not a legal opinion", text.lower())
@@ -474,9 +483,11 @@ class PdfTests(unittest.TestCase):
         self.assertIn("12 months before the Expiry Date", text)
         self.assertIn("linked from Base Rent", text)
         self.assertIn("$24,000.00 → $30,656.25", text)
-        schedule_b = text.split("Schedule B")[-1]
+        schedule_b = text.split("Schedule B")[-1].split("Source Exhibit")[0]
         self.assertNotIn("Rent Schedule", schedule_b)
         self.assertNotIn("9 months before the Expiry Date", schedule_b)
+        self.assertIn("Source Exhibit", text)
+        self.assertIn("Derived from", text)
 
     def test_third_amendment_updates_schedule_and_includes_precedence(self):
         second_rent = (
@@ -618,7 +629,8 @@ Executed as of the date first written above.
         self.assertIn("$29,941.33", text)
         self.assertIn("Order of Precedence", text)
         self.assertNotIn("Executed as of the date first written", text)
-        self.assertNotIn("Rent Schedule", text.split("Schedule B")[-1])
+        self.assertNotIn("Rent Schedule", text.split("Schedule B")[-1].split("Source Exhibit")[0])
+        self.assertIn("Source Exhibit", text)
 
 
 if __name__ == "__main__":

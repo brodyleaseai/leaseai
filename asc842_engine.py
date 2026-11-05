@@ -40,6 +40,9 @@ class ASC842ComplianceEngine:
         self.end_date = self._parse_date(lease_data.get('end_date'))
         self.monthly_payment = float(lease_data.get('monthly_payment', 0))
         self.discount_rate = float(lease_data.get('discount_rate', 0.05))
+        self.explicit_payments = list(lease_data.get('explicit_payments') or [])
+        self.liability_override = lease_data.get('liability_override')
+        self.rou_override = lease_data.get('rou_override')
         
         # Optional fields
         self.initial_direct_costs = float(lease_data.get('initial_direct_costs', 0))
@@ -96,6 +99,9 @@ class ASC842ComplianceEngine:
     
     def _calculate_lease_term(self) -> int:
         """Calculate effective lease term including options."""
+        if getattr(self, "explicit_payments", None):
+            return len(self.explicit_payments)
+
         base_months = (self.end_date.year - self.commencement_date.year) * 12 + \
                       (self.end_date.month - self.commencement_date.month)
         
@@ -105,6 +111,49 @@ class ASC842ComplianceEngine:
             self.warnings.append(f"Renewal option included: +{self.renewal_months} months")
         
         return base_months
+
+    def set_remeasured_balances(self, liability: float, rou: float) -> None:
+        """Use already-remeasured carrying amounts for subsequent schedules."""
+        self.liability_override = liability
+        self.rou_override = rou
+        self.initial_liability = round(float(liability), 2)
+        self.initial_rou_asset = round(float(rou), 2)
+
+    def balances_as_of(self, as_of) -> Dict:
+        """Carrying liability and ROU immediately before as_of."""
+        if self.liability_schedule is None:
+            self.generate_liability_amortization_schedule()
+        if self.rou_schedule is None:
+            self.generate_rou_asset_depreciation_schedule()
+
+        cutoff = as_of if isinstance(as_of, datetime) else self._parse_date(as_of)
+        last_liability = None
+        last_rou = None
+        for _, row in self.liability_schedule.iterrows():
+            row_date = self._parse_date(row["date"])
+            if row_date < cutoff:
+                last_liability = row
+            else:
+                break
+        for _, row in self.rou_schedule.iterrows():
+            row_date = self._parse_date(row["date"])
+            if row_date < cutoff:
+                last_rou = row
+            else:
+                break
+        if last_liability is None:
+            return {
+                "as_of": cutoff.strftime("%Y-%m-%d"),
+                "periods_elapsed": 0,
+                "liability": float(self.initial_liability),
+                "rou": float(self.initial_rou_asset),
+            }
+        return {
+            "as_of": cutoff.strftime("%Y-%m-%d"),
+            "periods_elapsed": int(last_liability["period"]),
+            "liability": float(last_liability["closing_balance"]),
+            "rou": float(last_rou["net_book_value"]) if last_rou is not None else float(self.initial_rou_asset),
+        }
     
     def classify_lease(self) -> str:
         """
@@ -150,6 +199,24 @@ class ASC842ComplianceEngine:
         Returns:
             List of payment dictionaries with date, base payment, variable payment, total
         """
+        if self.explicit_payments:
+            payments = []
+            for month, item in enumerate(self.explicit_payments):
+                amount = float(item.get("amount", item.get("base_payment", 0)) or 0)
+                raw_date = item.get("date")
+                if hasattr(raw_date, "strftime"):
+                    payment_date = raw_date.strftime("%Y-%m-%d")
+                else:
+                    payment_date = str(raw_date)[:10]
+                payments.append({
+                    "period": month + 1,
+                    "date": payment_date,
+                    "base_payment": round(amount, 2),
+                    "variable_payment": 0.0,
+                    "total_payment": round(amount, 2),
+                })
+            return payments
+
         payments = []
         current_date = self.commencement_date
         current_payment = self.monthly_payment
@@ -186,6 +253,10 @@ class ASC842ComplianceEngine:
         Formula: PV = Σ (Payment_t / (1 + r)^t)
         where r = monthly discount rate, t = period
         """
+        if self.liability_override is not None:
+            self.initial_liability = round(float(self.liability_override), 2)
+            return self.initial_liability
+
         monthly_rate = self.discount_rate / 12
         pv = 0
         
@@ -217,6 +288,10 @@ class ASC842ComplianceEngine:
         
         Formula: ROU Asset = Lease Liability + Initial Direct Costs + Prepayments - Lease Incentives
         """
+        if self.rou_override is not None:
+            self.initial_rou_asset = round(float(self.rou_override), 2)
+            return self.initial_rou_asset
+
         if self.initial_liability == 0:
             self.calculate_initial_lease_liability()
         
@@ -299,9 +374,21 @@ class ASC842ComplianceEngine:
         schedule = []
         accumulated_depreciation = 0
         
+        payment_dates = []
+        if self.explicit_payments:
+            for item in self.explicit_payments:
+                raw_date = item.get("date")
+                if hasattr(raw_date, "strftime"):
+                    payment_dates.append(raw_date.strftime("%Y-%m-%d"))
+                else:
+                    payment_dates.append(str(raw_date)[:10])
+
         for month in range(self.lease_term_months):
             period = month + 1
-            date = (self.commencement_date + relativedelta(months=month)).strftime('%Y-%m-%d')
+            if month < len(payment_dates):
+                date = payment_dates[month]
+            else:
+                date = (self.commencement_date + relativedelta(months=month)).strftime('%Y-%m-%d')
             
             opening_balance = self.initial_rou_asset - accumulated_depreciation
             

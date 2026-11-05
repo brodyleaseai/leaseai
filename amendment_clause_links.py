@@ -435,6 +435,16 @@ def _copy_parent_source(target: dict, parent: dict) -> None:
     target["effective_from"] = parent.get("effective_from")
     target["modification_type"] = "SUPERSEDES"
     target["linked_from"] = parent.get("clause_type")
+    target["derived_from"] = parent.get("clause_type")
+    parent_excerpt = (
+        parent.get("source_text")
+        or parent.get("governing_source_text")
+        or parent.get("governing_value")
+        or ""
+    )
+    target["source_text"] = parent_excerpt
+    target["governing_source_text"] = parent_excerpt
+    target["governing_source_page"] = parent.get("governing_source_page") or parent.get("source_page")
 
 
 def _latest_rsf_parent(clauses: List[dict]) -> Tuple[Optional[int], Optional[dict]]:

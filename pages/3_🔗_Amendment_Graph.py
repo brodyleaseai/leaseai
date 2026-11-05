@@ -9,12 +9,20 @@ import sys
 from datetime import datetime, date
 from supabase import create_client
 import config
-from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
+from amendment_graph_helpers import (
+    clause_types_from_history,
+    html_text,
+    lease_client_name,
+    lease_option_label,
+    sync_prepared_for,
+)
+from asc842_amendment import enrich_lease_client
 from amendment_report import (
     abstract_filename,
     build_amendment_resolution_model,
     generate_amendment_resolution_pdf,
 )
+from report_sources import clause_source, format_source_line
 
 # Initialize Supabase
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
@@ -189,7 +197,7 @@ with st.sidebar:
     # Get all leases with amendments
     try:
         leases_response = sb.table("leases").select(
-            "id, property_address, tenant_name, filename, client_id"
+            "id, property_address, tenant_name, filename, client_id, clients(name, company_name)"
         ).execute()
         leases = leases_response.data or []
     except Exception:
@@ -211,7 +219,10 @@ with st.sidebar:
     )
     
     selected_lease_id = lease_options[selected_lease_label]
-    selected_lease = next((lease for lease in leases if lease.get("id") == selected_lease_id), {})
+    selected_lease = enrich_lease_client(
+        sb,
+        next((lease for lease in leases if lease.get("id") == selected_lease_id), {}),
+    )
     
     st.markdown("---")
     st.markdown("### 🔍 Query Date")
@@ -509,11 +520,17 @@ with tab5:
     )
     st.markdown("---")
 
+    sync_prepared_for(
+        st.session_state,
+        lease_id=selected_lease_id,
+        client_name=lease_client_name(selected_lease),
+        value_key="abstract_prepared_for",
+        lease_key="abstract_prepared_lease_id",
+    )
     prepared_for = st.text_input(
         "Prepared for (client / customer)",
-        value=selected_lease.get("tenant_name") or "",
-        help="Name printed on the abstract cover.",
-        key=f"abstract_prepared_for_{selected_lease_id}",
+        help="Always the client on the selected lease. Switching leases replaces this name.",
+        key="abstract_prepared_for",
     )
 
     try:
@@ -601,8 +618,10 @@ with tab5:
                 st.markdown(f"**Changed:** {clause.get('change_summary')}")
                 st.markdown("**Original lease**")
                 st.write(clause["original_value"])
+                st.caption(format_source_line(clause_source(clause, "original")))
                 st.markdown(f"**Now governed by {clause.get('governing_label')}**")
                 st.write(clause["governing_value"])
+                st.caption(format_source_line(clause_source(clause, "governing")))
     else:
         st.info("No clause has been superseded yet. The original lease language still governs.")
 
@@ -614,6 +633,7 @@ with tab5:
             for clause in report_model["unchanged_clauses"]:
                 st.markdown(f"**{clause['clause_type']}**")
                 st.write(clause["governing_value"])
+                st.caption(format_source_line(clause_source(clause, "governing")))
 
     try:
         report_pdf = generate_amendment_resolution_pdf(report_model)

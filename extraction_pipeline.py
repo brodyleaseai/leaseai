@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+from report_sources import with_page_prefix
 
 
 class LeaseExtractionPipeline:
@@ -398,7 +399,8 @@ Return your response as a JSON object with this exact structure:
   "field_name": {{
     "value": "extracted value or NOT FOUND",
     "confidence": "HIGH|MEDIUM|LOW",
-    "source_snippet": "relevant text from lease (first 200 chars)",
+    "source_snippet": "verbatim excerpt from the lease, including the nearby heading if present (first 300 chars)",
+    "source_page": "page number if visible in the document text, otherwise omit",
     "notes": "any clarifications or reasoning"
   }}
 }}
@@ -602,7 +604,10 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             if isinstance(field_data, dict):
                 value = field_data.get("value", "NOT FOUND")
                 confidence_str = field_data.get("confidence", "LOW")
-                source_snippet = field_data.get("source_snippet", "")
+                source_snippet = with_page_prefix(
+                    field_data.get("source_snippet", ""),
+                    field_data.get("source_page"),
+                )
                 notes = field_data.get("notes", "")
             else:
                 value = str(field_data)

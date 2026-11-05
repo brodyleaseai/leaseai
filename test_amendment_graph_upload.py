@@ -4,7 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from amendment_graph_helpers import clause_types_from_history, html_text, lease_option_label
+from amendment_graph_helpers import (
+    clause_types_from_history,
+    html_text,
+    lease_client_name,
+    lease_option_label,
+    sync_prepared_for,
+)
 
 
 PAGE_PATH = Path(__file__).parent / "pages" / "3_🔗_Amendment_Graph.py"
@@ -43,6 +49,10 @@ class FakeQuery:
         return self
 
     def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, count):
+        self._rows = self._rows[:count]
         return self
 
     def execute(self):
@@ -117,6 +127,58 @@ class HelperTests(unittest.TestCase):
         a = {"id": "aaa11111-1", "property_address": "Route 2", "tenant_name": "Same"}
         b = {"id": "bbb22222-2", "property_address": "Route 2", "tenant_name": "Same"}
         self.assertNotEqual(lease_option_label(a), lease_option_label(b))
+
+    def test_lease_client_name_prefers_clients_row(self):
+        self.assertEqual(
+            lease_client_name(
+                {
+                    "tenant_name": "Occupying Tenant LLC",
+                    "clients": {"name": "Northland Capital", "company_name": "Northland"},
+                }
+            ),
+            "Northland Capital",
+        )
+        self.assertEqual(
+            lease_client_name({"tenant_name": "Occupying Tenant LLC"}),
+            "Occupying Tenant LLC",
+        )
+        self.assertEqual(lease_client_name({}), "")
+
+    def test_prepared_for_follows_the_selected_lease_client(self):
+        session = {}
+        sync_prepared_for(
+            session,
+            lease_id="lease-a",
+            client_name="Acme Properties",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Acme Properties")
+        sync_prepared_for(
+            session,
+            lease_id="lease-b",
+            client_name="Northland Capital",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Northland Capital")
+        session["prepared_for"] = "Edited by hand"
+        sync_prepared_for(
+            session,
+            lease_id="lease-b",
+            client_name="Northland Capital",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "Edited by hand")
+        sync_prepared_for(
+            session,
+            lease_id="lease-c",
+            client_name="",
+            value_key="prepared_for",
+            lease_key="prepared_lease_id",
+        )
+        self.assertEqual(session["prepared_for"], "")
 
 
 class PageSourceTests(unittest.TestCase):

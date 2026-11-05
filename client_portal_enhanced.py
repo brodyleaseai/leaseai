@@ -233,7 +233,12 @@ def process_uploaded_lease(
                     if isinstance(field_data, dict):
                         value = field_data.get("value", "NOT FOUND")
                         confidence_str = field_data.get("confidence", "LOW")
-                        source_snippet = field_data.get("source_snippet", "")
+                        from report_sources import with_page_prefix
+
+                        source_snippet = with_page_prefix(
+                            field_data.get("source_snippet", ""),
+                            field_data.get("source_page"),
+                        )
                         notes_field = field_data.get("notes", "")
                     else:
                         value = str(field_data)

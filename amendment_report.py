@@ -37,6 +37,7 @@ from amendment_clause_links import (
     extract_structural_clauses,
 )
 from lease_report import _header_footer
+from report_sources import clause_source, format_source_html
 
 VALUE_STATEMENT = (
     "This Amendment Resolution Abstract states the controlling lease language "
@@ -210,6 +211,25 @@ def _resolve_clause_values(
     return original_value, governing_value
 
 
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = _clean(value)
+        if text:
+            return text
+    return ""
+
+
+def _annotate_clause_sources(clause: Dict[str, Any]) -> Dict[str, Any]:
+    if not _clean(clause.get("original_source_text")):
+        clause["original_source_text"] = _clean(clause.get("original_value"))
+    if not _clean(clause.get("governing_source_text")):
+        clause["governing_source_text"] = _first_text(
+            clause.get("source_text"),
+            clause.get("governing_value"),
+        )
+    return clause
+
+
 def build_amendment_resolution_model(
     lease: Optional[dict],
     amendments: Optional[Iterable[dict]],
@@ -294,6 +314,30 @@ def build_amendment_resolution_model(
                 "change_summary": summarize_clause_change(original_value, governing_value),
                 "effective_from": current.get("effective_from") or recorded.get("effective_date"),
                 "modification_type": modification_type,
+                "original_source_text": _first_text(
+                    original.get("source_text"),
+                    recorded.get("original_value"),
+                    original.get("clause_value"),
+                    original_value,
+                ),
+                "governing_source_text": _first_text(
+                    current.get("source_text"),
+                    recorded.get("source_text"),
+                    recorded.get("new_value"),
+                    current.get("clause_value"),
+                    governing_value,
+                ),
+                "original_source_page": original.get("source_page") or original.get("page"),
+                "governing_source_page": (
+                    current.get("source_page")
+                    or recorded.get("source_page")
+                    or current.get("page")
+                ),
+                "source_text": _first_text(
+                    current.get("source_text"),
+                    recorded.get("source_text"),
+                    recorded.get("new_value"),
+                ),
                 "versions": versions,
             }
         )
@@ -348,12 +392,20 @@ def build_amendment_resolution_model(
                 "change_summary": summarize_clause_change(original_value, governing_value),
                 "effective_from": recorded.get("effective_date") or linked.get("amendment_date"),
                 "modification_type": recorded.get("modification_type") or "MODIFIES",
+                "original_source_text": _first_text(recorded.get("original_value"), original_value),
+                "governing_source_text": _first_text(
+                    recorded.get("source_text"),
+                    recorded.get("new_value"),
+                    governing_value,
+                ),
+                "source_text": _first_text(recorded.get("source_text"), recorded.get("new_value")),
                 "versions": [],
             }
         )
 
     clauses = apply_related_clause_updates(clauses)
     for clause in clauses:
+        _annotate_clause_sources(clause)
         if clause.get("changed"):
             clause["change_summary"] = summarize_clause_change(
                 clause.get("original_value") or "",
@@ -441,11 +493,27 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
         alignment=TA_CENTER,
         leading=10,
     )
+    source_style = ParagraphStyle(
+        "AmendmentReportSource",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#546E7A"),
+        alignment=TA_LEFT,
+    )
 
     value = model.get("value") or {}
     story = []
     story.append(Paragraph(f"{config.APP_NAME} Amendment Resolution Abstract", title_style))
     story.append(Paragraph(_pdf_text(value.get("statement") or VALUE_STATEMENT), body_style))
+    story.append(Spacer(1, 0.08 * inch))
+    story.append(
+        Paragraph(
+            "Each controlling value is cited to the source document text. "
+            "The Source Exhibit is the workpaper an auditor, lender, or buyer can attach.",
+            body_style,
+        )
+    )
     story.append(Spacer(1, 0.12 * inch))
     story.append(
         Paragraph(
@@ -571,12 +639,20 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
                 Spacer(1, 0.06 * inch),
                 Paragraph("<b>Original lease</b>", label_style),
                 Paragraph(_pdf_text(clause.get("original_value")), body_style),
+                Paragraph(
+                    f"<i>Source: {format_source_html(clause_source(clause, 'original'))}</i>",
+                    source_style,
+                ),
                 Spacer(1, 0.06 * inch),
                 Paragraph(
                     f"<b>Now governed by {_pdf_text(clause.get('governing_label'))}</b>",
                     label_style,
                 ),
                 Paragraph(_pdf_text(clause.get("governing_value")), body_style),
+                Paragraph(
+                    f"<i>Source: {format_source_html(clause_source(clause, 'governing'))}</i>",
+                    source_style,
+                ),
                 Spacer(1, 0.16 * inch),
             ]
             story.append(KeepTogether(block))
@@ -592,10 +668,61 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
                     [
                         Paragraph(_pdf_text(clause.get("clause_type")), label_style),
                         Paragraph(_pdf_text(clause.get("governing_value")), body_style),
+                        Paragraph(
+                            f"<i>Source: {format_source_html(clause_source(clause, 'governing'))}</i>",
+                            source_style,
+                        ),
                         Spacer(1, 0.12 * inch),
                     ]
                 )
             )
+
+    story.append(Paragraph("Source Exhibit — where each controlling value came from", heading_style))
+    story.append(
+        Paragraph(
+            "Document, page (if captured), and the excerpt used for the value. "
+            "Derived figures name the parent clause.",
+            body_style,
+        )
+    )
+    story.append(Spacer(1, 0.12 * inch))
+    exhibit_rows = [[
+        Paragraph("Clause", header_style),
+        Paragraph("Document / page", header_style),
+        Paragraph("Source excerpt", header_style),
+    ]]
+    for clause in model.get("clauses") or []:
+        source = clause_source(clause, "governing")
+        page_bit = f", p. {source['page']}" if source.get("page") else ""
+        derived = (
+            f"<br/>Derived from {_pdf_text(source.get('derived_from'))}"
+            if source.get("derived_from")
+            else ""
+        )
+        exhibit_rows.append(
+            [
+                Paragraph(_pdf_text(clause.get("clause_type")), label_style),
+                Paragraph(f"{_pdf_text(source.get('document'))}{page_bit}{derived}", source_style),
+                Paragraph(_pdf_text(source.get("excerpt") or "Source excerpt was not stored", limit=500), source_style),
+            ]
+        )
+    if len(exhibit_rows) > 1:
+        exhibit = Table(exhibit_rows, colWidths=[1.7 * inch, 1.9 * inch, 3.2 * inch], repeatRows=1)
+        exhibit.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FAFAFA")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#90CAF9")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        story.append(exhibit)
 
     generated = datetime.now().strftime("%B %d, %Y")
     story.append(Spacer(1, 0.2 * inch))
