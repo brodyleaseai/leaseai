@@ -32,6 +32,10 @@ from reportlab.platypus import (
 )
 
 import config
+from amendment_clause_links import (
+    apply_related_clause_updates,
+    extract_structural_clauses,
+)
 from lease_report import _header_footer
 
 VALUE_STATEMENT = (
@@ -79,19 +83,27 @@ def summarize_clause_change(original: str, governing: str) -> str:
             return "money"
         return "num"
 
-    pairs: List[str] = []
-    used = set()
-    for old in original_nums:
-        old_key = _key(old)
-        for index, new in enumerate(governing_nums):
-            if index in used or _kind(old) != _kind(new):
-                continue
-            if _key(new) != old_key:
-                pairs.append(f"{old.strip()} → {new.strip()}")
-                used.add(index)
+    def _pairs(old_nums: List[str], new_nums: List[str]) -> List[str]:
+        found: List[str] = []
+        used = set()
+        for old in old_nums:
+            old_key = _key(old)
+            for index, new in enumerate(new_nums):
+                if index in used or _kind(old) != _kind(new):
+                    continue
+                if _key(new) != old_key:
+                    found.append(f"{old.strip()} → {new.strip()}")
+                    used.add(index)
+                    break
+            if len(found) >= 3:
                 break
-        if len(pairs) >= 3:
-            break
+        return found
+
+    preferred = _pairs(
+        [token for token in original_nums if _kind(token) in {"money", "pct"}],
+        [token for token in governing_nums if _kind(token) in {"money", "pct"}],
+    )
+    pairs = preferred or _pairs(original_nums, governing_nums)
     if pairs:
         return "; ".join(pairs)
     if original and governing and original != governing:
@@ -286,6 +298,33 @@ def build_amendment_resolution_model(
             }
         )
 
+    for amendment in amendment_list:
+        extracted = amendment.get("extracted_data") or {}
+        text = ""
+        if isinstance(extracted, dict):
+            text = extracted.get("amendment_text") or ""
+            for mod in extracted.get("Clause_Modifications") or []:
+                if not isinstance(mod, dict):
+                    continue
+                if (mod.get("clause_type") or "") == "Order of Precedence":
+                    text = text or mod.get("new_value") or ""
+        for extra in extract_structural_clauses(
+            text or amendment.get("amendment_text") or "",
+            amendment.get("effective_date") or amendment.get("amendment_date"),
+        ):
+            extra_type = extra["clause_type"]
+            if extra_type in seen_types:
+                continue
+            clause_changes.setdefault(extra_type, {
+                "amendment_id": amendment.get("amendment_id") or amendment.get("id"),
+                "clause_type": extra_type,
+                "modification_type": extra.get("modification_type"),
+                "original_value": extra.get("original_value"),
+                "new_value": extra.get("new_value"),
+                "effective_date": extra.get("effective_date"),
+            })
+            modified_names.add(extra_type)
+
     for clause_type in sorted(modified_names - seen_types):
         recorded = clause_changes.get(clause_type) or {}
         linked = amendments_by_id.get(str(recorded.get("amendment_id") or ""), amendment_list[0] if amendment_list else {})
@@ -313,6 +352,13 @@ def build_amendment_resolution_model(
             }
         )
 
+    clauses = apply_related_clause_updates(clauses)
+    for clause in clauses:
+        if clause.get("changed"):
+            clause["change_summary"] = summarize_clause_change(
+                clause.get("original_value") or "",
+                clause.get("governing_value") or "",
+            )
     changed = [clause for clause in clauses if clause["changed"]]
     unchanged = [clause for clause in clauses if not clause["changed"]]
     for index, clause in enumerate(changed, start=1):
@@ -513,8 +559,13 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
                     body_style,
                 ),
                 Paragraph(
-                    f"{_pdf_text(clause.get('modification_type'))}, "
-                    f"effective {_pdf_text(clause.get('effective_from'))}.",
+                    f"{_pdf_text(clause.get('modification_type'))}"
+                    + (
+                        f", linked from {_pdf_text(clause.get('linked_from'))}"
+                        if clause.get("linked_from")
+                        else ""
+                    )
+                    + f", effective {_pdf_text(clause.get('effective_from'))}.",
                     body_style,
                 ),
                 Spacer(1, 0.06 * inch),

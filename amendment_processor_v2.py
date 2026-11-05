@@ -15,6 +15,11 @@ import json
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from extraction_pipeline import LeaseExtractionPipeline
+from amendment_clause_links import (
+    expand_related_modifications,
+    extract_structural_clauses,
+    is_execution_clause,
+)
 
 
 class AmendmentProcessorV2:
@@ -30,9 +35,11 @@ class AmendmentProcessorV2:
         self.clause_types = [
             # Financial
             "Base Rent",
+            "Rent Schedule",
             "Additional Rent",
             "Percentage Rent",
             "Rent Escalations",
+            "Interest on Overdue Amounts",
             "Security Deposit",
             "Letter of Credit",
             
@@ -49,6 +56,7 @@ class AmendmentProcessorV2:
             "Commencement Date",
             "Expiration Date",
             "Renewal Options",
+            "Renewal Notice Deadline",
             "Extension Options",
             "Termination Rights",
             "Early Termination",
@@ -64,6 +72,8 @@ class AmendmentProcessorV2:
             
             # Space & Access
             "Premises Description",
+            "Expansion of Premises",
+            "Proportionate Share",
             "Parking Spaces",
             "Parking Cost",
             "Storage Space",
@@ -95,6 +105,7 @@ class AmendmentProcessorV2:
             "Alterations",
             "Restoration Obligations",
             "Surrender Conditions",
+            "Order of Precedence",
         ]
     
     def process_amendment(
@@ -150,6 +161,7 @@ class AmendmentProcessorV2:
             lease_data, 
             supabase_client
         )
+        extracted_fields["amendment_text"] = amendment_text
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
         # Step 5: Create amendment record
@@ -170,9 +182,16 @@ class AmendmentProcessorV2:
             "created_at": datetime.utcnow().isoformat(),
         }
         
-        amendment_response = supabase_client.table("amendments").insert(amendment_data).execute()
-        amendment_id = amendment_response.data[0]["id"]
-        print(f"✓ Amendment #{amendment_number} created: {amendment_id}")
+        amendment_id, replaced = self._save_amendment_record(
+            lease_id,
+            amendment_number,
+            amendment_data,
+            supabase_client,
+        )
+        if replaced:
+            print(f"✓ Amendment #{amendment_number} already existed — replaced {amendment_id}")
+        else:
+            print(f"✓ Amendment #{amendment_number} created: {amendment_id}")
         
         # Step 6: Parse and save clause modifications
         print(f"\n[6/8] Analyzing clause modifications...")
@@ -180,7 +199,42 @@ class AmendmentProcessorV2:
             extracted_fields, 
             effective_date
         )
+        clause_modifications = [
+            row
+            for row in clause_modifications
+            if not is_execution_clause(row.get("clause_type"), row.get("new_value") or "")
+        ]
+        present_types = {row["clause_type"] for row in clause_modifications}
+        for extra in extract_structural_clauses(amendment_text, effective_date):
+            if extra["clause_type"] not in present_types:
+                clause_modifications.append(extra)
+                present_types.add(extra["clause_type"])
+        existing_originals = {}
+        history_texts = {}
+        try:
+            history = supabase_client.table("lease_clause_history").select(
+                "clause_type, clause_value, is_current"
+            ).eq("lease_id", lease_id).execute()
+            for row in history.data or []:
+                name = row.get("clause_type")
+                value = row.get("clause_value")
+                if not name or not value:
+                    continue
+                history_texts.setdefault(name, []).append(value)
+                if row.get("is_current"):
+                    existing_originals[name] = value
+        except Exception:
+            existing_originals = {}
+            history_texts = {}
+        before_count = len(clause_modifications)
+        clause_modifications = expand_related_modifications(
+            clause_modifications,
+            existing_originals,
+            history_texts=history_texts,
+        )
         print(f"✓ Found {len(clause_modifications)} clause modification(s)")
+        if len(clause_modifications) > before_count:
+            print(f"   Linked {len(clause_modifications) - before_count} related clause(s)")
         
         if clause_modifications:
             print(f"\n   Clause modifications detected:")
@@ -286,6 +340,11 @@ CRITICAL INSTRUCTIONS:
 - Do NOT summarize - extract the full legal text
 - If the original value is not stated, write "Not stated - amendment only provides new value"
 - Be precise about dates, amounts, percentages, and legal terms
+- If Base Rent / Section 5 is replaced, also emit Rent Schedule (every year) and Rent Escalations (including when a % formula is removed)
+- If premises square footage changes, emit Premises Description and rebuild Rent Schedule at the new RSF using the still-governing dollar rates
+- If renewal notice timing changes, emit Renewal Notice Deadline (not only Renewal Options)
+- Extract Order of Precedence / Priority and Continuing Effect when present
+- Do NOT extract Execution, signature blocks, or “executed as of” closing language
 
 AMENDMENT DOCUMENT TEXT ({len(amendment_text_truncated):,} characters):
 ---
@@ -479,6 +538,68 @@ RETURN ONLY THE JSON OBJECT. No additional text or explanation.
             
             supabase_client.table("lease_clause_history").insert(history_record).execute()
             print(f"   ✓ {clause_type}: v{max_version} → v{new_version}")
+
+    def _save_amendment_record(
+        self,
+        lease_id: str,
+        amendment_number: int,
+        amendment_data: Dict,
+        supabase_client,
+    ) -> Tuple[str, bool]:
+        """Insert a new amendment, or replace the existing one for this number."""
+        existing = (
+            supabase_client.table("amendments")
+            .select("id")
+            .eq("lease_id", lease_id)
+            .eq("amendment_number", amendment_number)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            amendment_id = existing.data[0]["id"]
+            self._clear_prior_extraction(lease_id, amendment_id, supabase_client)
+            update_data = {key: value for key, value in amendment_data.items() if key != "created_at"}
+            update_data["updated_at"] = datetime.utcnow().isoformat()
+            supabase_client.table("amendments").update(update_data).eq("id", amendment_id).execute()
+            return amendment_id, True
+
+        response = supabase_client.table("amendments").insert(amendment_data).execute()
+        return response.data[0]["id"], False
+
+    def _clear_prior_extraction(self, lease_id: str, amendment_id: str, supabase_client) -> None:
+        """Remove the last extract for this amendment so a re-process can rewrite it."""
+        prior_history = (
+            supabase_client.table("lease_clause_history")
+            .select("clause_type")
+            .eq("lease_id", lease_id)
+            .eq("source_document_id", amendment_id)
+            .execute()
+        )
+        affected = {
+            row.get("clause_type")
+            for row in (prior_history.data or [])
+            if row.get("clause_type")
+        }
+        supabase_client.table("amendment_clauses").delete().eq(
+            "amendment_id", amendment_id
+        ).execute()
+        supabase_client.table("lease_clause_history").delete().eq(
+            "lease_id", lease_id
+        ).eq("source_document_id", amendment_id).execute()
+        for clause_type in affected:
+            remaining = (
+                supabase_client.table("lease_clause_history")
+                .select("id, version_number")
+                .eq("lease_id", lease_id)
+                .eq("clause_type", clause_type)
+                .order("version_number", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if remaining.data:
+                supabase_client.table("lease_clause_history").update(
+                    {"is_current": True, "effective_to": None}
+                ).eq("id", remaining.data[0]["id"]).execute()
     
     def _parse_amendment_number(self, field_data) -> int:
         """Parse amendment number from field data."""
