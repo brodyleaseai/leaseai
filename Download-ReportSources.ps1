@@ -8,7 +8,10 @@ function Save-RepoFile([string]$RelPath) {
     if ($dir) {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
     }
-    Invoke-WebRequest -Uri $uri -OutFile $out -UseBasicParsing
+    curl.exe -L $uri -o $out
+    if ($LASTEXITCODE -ne 0) {
+        throw "Download failed: $uri"
+    }
     Write-Host "Saved $out"
 }
 
