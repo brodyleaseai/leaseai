@@ -6,8 +6,18 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
+from datetime import date, datetime
 import json
+from asc842_amendment import (
+    MODE_COMMENCEMENT,
+    MODE_REMEASUREMENT,
+    build_measurement,
+    latest_amendment_date,
+    load_amendment_bundle,
+    public_measurement_preview,
+    run_amended_calculation,
+)
+from asc842_cashflows import parse_date
 from asc842_engine import ASC842ComplianceEngine
 
 
@@ -60,6 +70,36 @@ def render_new_calculation_tab(supabase, auth):
         lease_options = {f"#{l['id']} - {l['property_address']} ({l['tenant_name']})": l['id'] for l in leases}
         selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()))
         selected_lease_id = lease_options[selected_lease_label]
+        amendment_bundle = load_amendment_bundle(supabase, selected_lease_id)
+        stored_amendments = amendment_bundle.get("amendments") or []
+        measurement_mode = MODE_COMMENCEMENT
+        as_of_date = date.today()
+        revised_discount_rate = None
+        if stored_amendments:
+            st.info(
+                f"{len(stored_amendments)} amendment(s) on file. "
+                "Choose as-amended to remeasure from the Resolution Graph — no restated PDF."
+            )
+            mode_label = st.radio(
+                "Measurement",
+                ["At commencement (original lease)", "As amended (modification accounting)"],
+            )
+            measurement_mode = (
+                MODE_REMEASUREMENT if mode_label.startswith("As amended") else MODE_COMMENCEMENT
+            )
+            if measurement_mode == MODE_REMEASUREMENT:
+                default_as_of = parse_date(latest_amendment_date(stored_amendments))
+                as_of_date = st.date_input(
+                    "Remeasure as of",
+                    value=(default_as_of.date() if default_as_of else date.today()),
+                )
+                revised_discount_rate = st.number_input(
+                    "Revised IBR at modification (%)",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=6.0,
+                    step=0.1,
+                ) / 100
         
         st.markdown("---")
         
@@ -152,8 +192,51 @@ def render_new_calculation_tab(supabase, auth):
                 
                 # Run calculation
                 try:
-                    engine = ASC842ComplianceEngine(lease_data)
-                    results = engine.run_full_calculation()
+                    if measurement_mode == MODE_REMEASUREMENT:
+                        measurement = build_measurement(
+                            amendment_bundle.get("lease"),
+                            stored_amendments,
+                            amendment_bundle.get("history"),
+                            as_of=as_of_date.isoformat(),
+                            mode=MODE_REMEASUREMENT,
+                            amendment_clauses=amendment_bundle.get("amendment_clauses"),
+                            commencement_date=commencement_date.strftime("%Y-%m-%d"),
+                            end_date=end_date.strftime("%Y-%m-%d"),
+                            fallback_monthly=monthly_payment,
+                            fallback_increase=annual_increase,
+                        )
+                        preview = public_measurement_preview(measurement)
+                        st.info(
+                            f"{preview.get('kind')} as of {preview.get('modification_date')}. "
+                            f"First remaining payment ${preview.get('first_revised_monthly') or 0:,.2f}."
+                        )
+                        if not measurement.get("revised_payments"):
+                            raise ValueError(
+                                "Could not build a governing payment schedule from the amendment graph."
+                            )
+                        original_data = dict(lease_data)
+                        if measurement.get("original_payments"):
+                            original_data["explicit_payments"] = measurement["original_payments"]
+                            original_data["monthly_payment"] = measurement["first_original_monthly"]
+                            original_data["annual_rent_increases"] = 0.0
+                        amendment_results = run_amended_calculation(
+                            original_data,
+                            measurement["revised_payments"],
+                            modification_date=measurement.get("modification_date") or as_of_date.isoformat(),
+                            revised_discount_rate=revised_discount_rate if revised_discount_rate is not None else discount_rate,
+                            scope_reduction_ratio=(
+                                (measurement.get("classification") or {}).get("scope_reduction_ratio") or 0
+                            ),
+                            classification=measurement.get("classification"),
+                        )
+                        results = amendment_results["subsequent_results"]
+                        results["initial_liability"] = amendment_results["remeasured_liability"]
+                        results["initial_rou_asset"] = amendment_results["remeasured_rou"]
+                        results["modification"] = amendment_results
+                        lease_data["amendment_measurement"] = preview
+                    else:
+                        engine = ASC842ComplianceEngine(lease_data)
+                        results = engine.run_full_calculation()
                     
                     # Display results (outside form)
                     display_calculation_results(results)
@@ -199,6 +282,17 @@ def display_calculation_results(results):
     
     with col4:
         st.metric("Lease Term", f"{results['lease_term_months']} months")
+
+    modification = results.get("modification")
+    if modification:
+        st.markdown("**Lease modification**")
+        carrying = modification.get("carrying") or {}
+        partial = modification.get("partial_termination") or {}
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Carrying liability", f"${carrying.get('liability', 0):,.2f}")
+        m2.metric("Carrying ROU", f"${carrying.get('rou', 0):,.2f}")
+        m3.metric("Remeasured liability", f"${modification.get('remeasured_liability', 0):,.2f}")
+        m4.metric("Gain / (loss)", f"${partial.get('gain_loss', 0):,.2f}")
     
     # Classification reasons
     if results['classification_reasons']:

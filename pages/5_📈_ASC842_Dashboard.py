@@ -32,7 +32,34 @@ except Exception:
 
 from supabase import create_client
 from auth_module import AuthManager
+from asc842_amendment import (
+    MODE_COMMENCEMENT,
+    MODE_REMEASUREMENT,
+    build_measurement,
+    latest_amendment_date,
+    load_amendment_bundle,
+    public_measurement_preview,
+    run_amended_calculation,
+)
+from asc842_cashflows import parse_date
 from asc842_engine import ASC842ComplianceEngine
+
+
+def journal_sides(entry):
+    """Support both engine `lines` and older debit/credit lists."""
+    if entry.get("lines"):
+        debits = [
+            {"account": line.get("account"), "amount": line.get("debit") or 0}
+            for line in entry["lines"]
+            if line.get("debit")
+        ]
+        credits = [
+            {"account": line.get("account"), "amount": line.get("credit") or 0}
+            for line in entry["lines"]
+            if line.get("credit")
+        ]
+        return debits, credits
+    return entry.get("debits") or [], entry.get("credits") or []
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 auth = AuthManager(sb)
@@ -75,6 +102,43 @@ with tab1:
         
         selected_lease_label = st.selectbox("Select Lease", list(lease_options.keys()))
         selected_lease_id = lease_options[selected_lease_label]
+        amendment_bundle = load_amendment_bundle(sb, selected_lease_id)
+        stored_amendments = amendment_bundle.get("amendments") or []
+        measurement_mode = MODE_COMMENCEMENT
+        as_of_date = date.today()
+        revised_discount_rate = 5.0
+
+        if stored_amendments:
+            st.info(
+                f"This lease has **{len(stored_amendments)} amendment(s)** on file. "
+                "ASC 842 / IFRS 16 can measure the original lease at commencement or "
+                "remeasure from the amendment effective date. The Amendment Resolution "
+                "Graph supplies the governing rent schedule — no restated lease PDF is required."
+            )
+            mode_label = st.radio(
+                "Measurement",
+                [
+                    "At commencement (original lease)",
+                    "As amended (modification accounting)",
+                ],
+                help=(
+                    "As amended rolls the pre-modification liability and ROU asset to the "
+                    "effective date, then remeasures remaining payments at the revised IBR. "
+                    "A partial surrender also recognizes a proportionate gain or loss."
+                ),
+            )
+            measurement_mode = (
+                MODE_REMEASUREMENT
+                if mode_label.startswith("As amended")
+                else MODE_COMMENCEMENT
+            )
+            if measurement_mode == MODE_REMEASUREMENT:
+                default_as_of = parse_date(latest_amendment_date(stored_amendments))
+                as_of_date = st.date_input(
+                    "Remeasure as of",
+                    value=(default_as_of.date() if default_as_of else date.today()),
+                    help="Usually the latest amendment effective date (for example October 1, 2028).",
+                )
         
         st.markdown("---")
         st.markdown("### Lease Parameters")
@@ -106,6 +170,15 @@ with tab1:
         with col3:
             st.markdown("**Economic Factors**")
             discount_rate = st.number_input("Incremental Borrowing Rate (%)", min_value=0.0, max_value=20.0, value=5.0, step=0.1)
+            if measurement_mode == MODE_REMEASUREMENT:
+                revised_discount_rate = st.number_input(
+                    "Revised IBR at modification (%)",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=float(discount_rate),
+                    step=0.1,
+                    help="ASC 842 uses the incremental borrowing rate as of the modification effective date.",
+                )
             initial_direct_costs = st.number_input("Initial Direct Costs ($)", min_value=0.0, value=0.0, step=100.0)
             lease_incentives = st.number_input("Lease Incentives ($)", min_value=0.0, value=0.0, step=100.0)
             prepayments = st.number_input("Prepayments ($)", min_value=0.0, value=0.0, step=100.0)
@@ -133,6 +206,54 @@ with tab1:
         
         with col3:
             residual_guarantee = st.number_input("Residual Value Guarantee ($)", min_value=0.0, value=0.0, step=1000.0)
+
+        measurement = None
+        if measurement_mode == MODE_REMEASUREMENT and stored_amendments:
+            measurement = build_measurement(
+                amendment_bundle.get("lease"),
+                stored_amendments,
+                amendment_bundle.get("history"),
+                as_of=as_of_date.isoformat(),
+                mode=MODE_REMEASUREMENT,
+                amendment_clauses=amendment_bundle.get("amendment_clauses"),
+                commencement_date=commencement_date.isoformat(),
+                end_date=end_date.isoformat(),
+                fallback_monthly=monthly_payment,
+                fallback_increase=annual_increase / 100,
+            )
+            preview = public_measurement_preview(measurement)
+            st.markdown("### Governing terms from the Amendment Resolution Graph")
+            kind_label = {
+                "PARTIAL_TERMINATION": "Partial termination (decrease in premises)",
+                "SCOPE_INCREASE": "Increase in premises — remeasure the whole lease",
+                "CONSIDERATION": "Change in consideration (rent or escalations)",
+                "TERM_CHANGE": "Change in lease term",
+                "INITIAL": "Original lease — no modification yet",
+                "NO_ACCOUNTING_CHANGE": "No rent, term, or premises change detected",
+            }.get(preview.get("kind"), preview.get("kind") or "Modification")
+            st.success(
+                f"**{kind_label}** as of {preview.get('modification_date') or preview.get('as_of')}. "
+                "Remaining cash flows come from the governing schedule, not a new PDF."
+            )
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Amendments applied", len(preview.get("amendments") or []))
+            rsf_value = preview.get("governing_rsf")
+            surrendered = preview.get("surrendered_rsf")
+            p2.metric(
+                "RSF",
+                f"{rsf_value:,}" if rsf_value else "—",
+                delta=f"{surrendered:,} surrendered" if surrendered else None,
+            )
+            p3.metric(
+                "First remaining payment",
+                f"${preview.get('first_revised_monthly') or 0:,.2f}",
+            )
+            p4.metric("Remaining months", preview.get("revised_payment_count") or 0)
+            if preview.get("amendments"):
+                st.caption("Applied: " + " · ".join(preview["amendments"]))
+            if preview.get("governing_schedule"):
+                with st.expander("Governing rent schedule used for the remeasurement"):
+                    st.write(preview["governing_schedule"])
         
         st.markdown("---")
         
@@ -162,24 +283,77 @@ with tab1:
                         'annual_rent_increases': annual_increase / 100
                     }
                     
-                    # Initialize ASC 842 engine
-                    engine = ASC842ComplianceEngine(lease_data)
-                    
-                    # Run full calculation (this does everything at once)
-                    results = engine.run_full_calculation()
-                    
-                    # Extract key values from results
-                    engine.initial_liability = results.get('initial_liability', 0)
-                    engine.initial_rou_asset = results.get('initial_rou_asset', 0)
-                    engine.lease_classification = results.get('classification', 'Operating')
-                    
-                    # Generate individual components
-                    engine.liability_schedule = engine.generate_liability_amortization_schedule()
-                    engine.rou_schedule = engine.generate_rou_asset_depreciation_schedule()
-                    engine.journal_entries = engine.generate_monthly_journal_entries()
+                    amendment_results = None
+                    if measurement_mode == MODE_REMEASUREMENT:
+                        if measurement is None:
+                            measurement = build_measurement(
+                                amendment_bundle.get("lease"),
+                                stored_amendments,
+                                amendment_bundle.get("history"),
+                                as_of=as_of_date.isoformat(),
+                                mode=MODE_REMEASUREMENT,
+                                amendment_clauses=amendment_bundle.get("amendment_clauses"),
+                                commencement_date=commencement_date.isoformat(),
+                                end_date=end_date.isoformat(),
+                                fallback_monthly=monthly_payment,
+                                fallback_increase=annual_increase / 100,
+                            )
+                        if not measurement.get("revised_payments"):
+                            raise ValueError(
+                                "Could not build a governing payment schedule from the "
+                                "amendment graph. Confirm the amendment is processed, or "
+                                "enter monthly rent and dates as a fallback."
+                            )
+                        original_data = dict(lease_data)
+                        if measurement.get("original_payments"):
+                            original_data["explicit_payments"] = measurement["original_payments"]
+                            original_data["monthly_payment"] = measurement["first_original_monthly"]
+                            original_data["annual_rent_increases"] = 0.0
+                        amendment_results = run_amended_calculation(
+                            original_data,
+                            measurement["revised_payments"],
+                            modification_date=measurement.get("modification_date") or as_of_date.isoformat(),
+                            revised_discount_rate=revised_discount_rate / 100,
+                            scope_reduction_ratio=(
+                                (measurement.get("classification") or {}).get("scope_reduction_ratio") or 0
+                            ),
+                            classification=measurement.get("classification"),
+                        )
+                        results = amendment_results["subsequent_results"]
+                        engine = ASC842ComplianceEngine(lease_data)
+                        engine.initial_liability = amendment_results.get("remeasured_liability", 0)
+                        engine.initial_rou_asset = amendment_results.get("remeasured_rou", 0)
+                        engine.lease_classification = results.get("classification", "Operating")
+                        engine.lease_term_months = results.get("lease_term_months", 0)
+                        engine.liability_schedule = pd.DataFrame(results.get("liability_schedule") or [])
+                        engine.rou_schedule = pd.DataFrame(results.get("rou_asset_schedule") or [])
+                        engine.journal_entries = [amendment_results.get("modification_journal_entry")] + list(
+                            results.get("monthly_journal_entries") or []
+                        )
+                        engine.warnings = amendment_results.get("warnings") or []
+                        engine.errors = amendment_results.get("errors") or []
+                    else:
+                        # Initialize ASC 842 engine
+                        engine = ASC842ComplianceEngine(lease_data)
+                        
+                        # Run full calculation (this does everything at once)
+                        results = engine.run_full_calculation()
+                        
+                        # Extract key values from results
+                        engine.initial_liability = results.get('initial_liability', 0)
+                        engine.initial_rou_asset = results.get('initial_rou_asset', 0)
+                        engine.lease_classification = results.get('classification', 'Operating')
+                        
+                        # Generate individual components
+                        engine.liability_schedule = engine.generate_liability_amortization_schedule()
+                        engine.rou_schedule = engine.generate_rou_asset_depreciation_schedule()
+                        engine.journal_entries = engine.generate_monthly_journal_entries()
                     
                     # Display results
-                    st.success("✅ ASC 842 Compliance Calculation Complete!")
+                    if amendment_results:
+                        st.success("✅ ASC 842 modification remeasurement complete!")
+                    else:
+                        st.success("✅ ASC 842 Compliance Calculation Complete!")
                     
                     st.markdown("---")
                     st.markdown("## 📊 Calculation Results")
@@ -212,8 +386,47 @@ with tab1:
                         st.metric(
                             "Effective Lease Term",
                             f"{engine.lease_term_months} months",
-                            help="Total term including exercised options"
+                            help="Remaining months after remeasurement, or full term at commencement"
                         )
+
+                    if amendment_results:
+                        st.markdown("### Lease modification (ASC 842 / IFRS 16)")
+                        carrying = amendment_results.get("carrying") or {}
+                        partial = amendment_results.get("partial_termination") or {}
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric(
+                            "Carrying liability",
+                            f"${carrying.get('liability', 0):,.2f}",
+                            help="Lease liability immediately before the modification",
+                        )
+                        m2.metric(
+                            "Carrying ROU asset",
+                            f"${carrying.get('rou', 0):,.2f}",
+                        )
+                        m3.metric(
+                            "Remeasured liability",
+                            f"${amendment_results.get('remeasured_liability', 0):,.2f}",
+                        )
+                        gain = partial.get("gain_loss") or 0
+                        m4.metric(
+                            "Gain / (loss) on surrender",
+                            f"${gain:,.2f}",
+                            help="Proportionate liability minus ROU removed on a partial termination",
+                        )
+                        st.caption(
+                            f"Modification date {amendment_results.get('modification_date')} · "
+                            f"Kind {amendment_results.get('measurement_kind')} · "
+                            f"Scope reduction {100 * (amendment_results.get('scope_reduction_ratio') or 0):.2f}% · "
+                            f"Revised IBR {100 * (amendment_results.get('revised_discount_rate') or 0):.2f}%"
+                        )
+                        with st.expander("Modification journal entry"):
+                            entry = amendment_results.get("modification_journal_entry") or {}
+                            st.markdown(f"**{entry.get('description', 'Lease modification')}**")
+                            debits, credits = journal_sides(entry)
+                            for debit in debits:
+                                st.markdown(f"- Dr {debit['account']}: ${debit['amount']:,.2f}")
+                            for credit in credits:
+                                st.markdown(f"- Cr {credit['account']}: ${credit['amount']:,.2f}")
                     
                     # Warnings/Errors
                     if engine.warnings:
@@ -293,11 +506,12 @@ with tab1:
                             with st.expander(f"Entry {i}: {entry.get('description', 'Journal Entry')} - {entry.get('date', 'N/A')}"):
                                 st.markdown(f"**Date:** {entry.get('date', 'N/A')}")
                                 st.markdown(f"**Description:** {entry.get('description', 'N/A')}")
+                                debits, credits = journal_sides(entry)
                                 st.markdown("**Debits:**")
-                                for debit in entry.get('debits', []):
+                                for debit in debits:
                                     st.markdown(f"- {debit['account']}: ${debit['amount']:,.2f}")
                                 st.markdown("**Credits:**")
-                                for credit in entry.get('credits', []):
+                                for credit in credits:
                                     st.markdown(f"- {credit['account']}: ${credit['amount']:,.2f}")
                         
                         st.info(f"Showing 5 of {len(engine.journal_entries)} journal entries. Download full report for all entries.")
@@ -306,6 +520,19 @@ with tab1:
                     
                     # Save to database (optional)
                     try:
+                        stored_inputs = dict(lease_data)
+                        stored_inputs["measurement_mode"] = measurement_mode
+                        if amendment_results:
+                            stored_inputs["amendment_measurement"] = {
+                                "as_of": as_of_date.isoformat(),
+                                "modification_date": amendment_results.get("modification_date"),
+                                "kind": amendment_results.get("measurement_kind"),
+                                "revised_discount_rate": amendment_results.get("revised_discount_rate"),
+                                "scope_reduction_ratio": amendment_results.get("scope_reduction_ratio"),
+                                "carrying": amendment_results.get("carrying"),
+                                "partial_termination": amendment_results.get("partial_termination"),
+                                "preview": public_measurement_preview(measurement) if measurement else {},
+                            }
                         calculation_record = {
                             "lease_id": selected_lease_id,
                             "calculation_date": datetime.now().isoformat(),
@@ -313,8 +540,12 @@ with tab1:
                             "initial_rou_asset": float(engine.initial_rou_asset),
                             "initial_liability": float(engine.initial_liability),
                             "lease_term_months": int(engine.lease_term_months),
-                            "discount_rate": float(discount_rate),
-                            "calculation_data": json.dumps(lease_data)
+                            "discount_rate": float(
+                                revised_discount_rate
+                                if amendment_results
+                                else discount_rate
+                            ),
+                            "calculation_data": json.dumps(stored_inputs)
                         }
                         
                         sb.table("asc842_calculations").insert(calculation_record).execute()
@@ -367,6 +598,18 @@ with tab2:
                         st.metric("Lease Liability", f"${calc.get('initial_liability', 0):,.2f}")
                     with col4:
                         st.metric("Term", f"{calc.get('lease_term_months', 0)} mo")
+                    raw_data = calc.get("calculation_data") or {}
+                    if isinstance(raw_data, str):
+                        try:
+                            raw_data = json.loads(raw_data)
+                        except json.JSONDecodeError:
+                            raw_data = {}
+                    amendment_info = raw_data.get("amendment_measurement") or {}
+                    if amendment_info:
+                        st.caption(
+                            f"As amended · {amendment_info.get('kind')} · "
+                            f"effective {amendment_info.get('modification_date')}"
+                        )
                     
                     if st.button(f"View Full Report", key=f"report_{calc['id']}"):
                         st.info("Full report viewing feature coming soon!")
@@ -423,7 +666,11 @@ with tab3:
 with tab4:
     st.subheader("📄 Generate Compliance Reports")
     
-    st.info("🚧 Professional PDF Report Generation - Coming Soon!")
+    st.info(
+        "Run a calculation on the New Calculation tab, including **As amended** "
+        "when the lease has an amendment chain. Download the liability and ROU "
+        "CSVs from that result. A branded PDF package is still on the roadmap."
+    )
     
     st.markdown("""
     The compliance report will include:
@@ -523,12 +770,19 @@ with tab5:
     
     #### 5. **Lease Modifications**
     
-    A **modification** is a change to lease scope or consideration that was not part of original terms.
+    A **modification** is a change to lease scope or consideration that was not part of original terms
+    (ASC 842-10-25-11 through 25-13; IFRS 16.44–46).
     
-    **Treatment depends on:**
-    - Whether it's a separate lease (additional right-of-use)
-    - Classification of original and modified lease
-    - Specific modification circumstances
+    **LeaseAI does not need a restated “as-amended” PDF.** Upload each amendment as it is signed.
+    The Amendment Resolution Graph already holds the governing rent schedule, RSF, and term.
+    On this page choose **As amended (modification accounting)** and the as-of date:
+    
+    1. Roll the pre-modification liability and ROU asset to the effective date.
+    2. If premises shrink (a partial surrender), derecognize that proportion of the liability and ROU and recognize the gain or loss.
+    3. Remeasure the remaining liability as the present value of remaining revised payments at the IBR as of the modification date.
+    4. Adjust the remaining ROU asset by the same amount as the remaining liability.
+    
+    Use **At commencement** when you need the original Day-1 measurement. The accountant still enters the incremental borrowing rate and reasonably-certain flags.
     
     #### 6. **Practical Expedients**
     
