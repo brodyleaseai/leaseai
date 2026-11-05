@@ -308,6 +308,176 @@ class PdfTests(unittest.TestCase):
         self.assertIn("still governed by the original lease", text.lower())
         self.assertIn("not a legal opinion", text.lower())
 
+    def test_northshore_second_amendment_rebuilds_rent_schedule(self):
+        history = HISTORY + [
+            {
+                "clause_type": "Rent Schedule",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": (
+                    "Year 1 (April 1, 2025–March 31, 2026): $24.00/RSF/year = $24,000.00/month; "
+                    "Year 10 (April 1, 2034–March 31, 2035): $31.31/RSF/year = $31,310.00/month"
+                ),
+                "is_current": True,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Rent Escalations",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "3%",
+                "is_current": True,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "12,000 sq ft",
+                "is_current": True,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Renewal Notice Deadline",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "9 months before the Expiry Date",
+                "is_current": True,
+                "effective_from": "2025-04-01",
+            },
+        ]
+        amendments = [
+            {
+                "amendment_id": "amd-1",
+                "amendment_number": 1,
+                "amendment_date": "2026-06-18",
+                "status": "READY FOR REVIEW",
+                "modified_clauses": ["Expansion of Premises"],
+            },
+            {
+                "amendment_id": "amd-2",
+                "amendment_number": 2,
+                "amendment_date": "2027-02-12",
+                "status": "READY FOR REVIEW",
+                "modified_clauses": ["Base Rent", "Renewal Options"],
+            },
+        ]
+        recorded = [
+            {
+                "amendment_id": "amd-1",
+                "clause_type": "Expansion of Premises",
+                "modification_type": "ADDS",
+                "original_value": "Not stated - amendment only provides new value",
+                "new_value": (
+                    "From and after the Expansion Effective Date, the Premises comprise "
+                    "13,500 rentable square feet in total."
+                ),
+                "effective_date": "2026-07-01",
+            },
+            {
+                "amendment_id": "amd-2",
+                "clause_type": "Base Rent",
+                "modification_type": "SUPERSEDES",
+                "original_value": "$24,000",
+                "new_value": (
+                    "5. BASE RENT. From April 1, 2027 to March 31, 2035, Tenant shall pay "
+                    "annual Base Rent for the entire Premises, currently comprising 13,500 "
+                    "rentable square feet, at the following rates: April 1, 2027–March 31, 2028: "
+                    "$27.25 per rentable square foot per annum; April 1, 2028–March 31, 2029: "
+                    "$28.07; April 1, 2029–March 31, 2030: $28.91; April 1, 2030–March 31, 2031: "
+                    "$29.78; April 1, 2031–March 31, 2032: $30.67; April 1, 2032–March 31, 2033: "
+                    "$31.59; April 1, 2033–March 31, 2034: $32.54; and April 1, 2034–March 31, "
+                    "2035: $33.52. The rates in this Section are fixed dollar rates and replace, "
+                    "not supplement, any annual percentage escalation formula. No additional 3% "
+                    "escalation shall be applied."
+                ),
+                "effective_date": "2027-04-01",
+            },
+            {
+                "amendment_id": "amd-2",
+                "clause_type": "Renewal Options",
+                "modification_type": "MODIFIES",
+                "original_value": "1",
+                "new_value": 'The words “not later than twelve (12) months”',
+                "effective_date": "2027-04-01",
+            },
+        ]
+        history = [
+            {
+                "clause_type": "Base Rent",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$24,000",
+                "is_current": False,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 2,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-2",
+                "clause_value": recorded[1]["new_value"],
+                "is_current": True,
+                "effective_from": "2027-04-01",
+                "modification_type": "SUPERSEDES",
+            },
+            {
+                "clause_type": "Renewal Options",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "1",
+                "is_current": False,
+                "effective_from": "2025-04-01",
+            },
+            {
+                "clause_type": "Renewal Options",
+                "version_number": 2,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-2",
+                "clause_value": recorded[2]["new_value"],
+                "is_current": True,
+                "effective_from": "2027-04-01",
+                "modification_type": "MODIFIES",
+            },
+        ] + history[2:]
+        model = build_amendment_resolution_model(
+            {
+                "property_address": "8800 Riverfront Dr, Richmond, BC",
+                "tenant_name": "Juniper Coast Analytics Inc.",
+            },
+            amendments,
+            history,
+            as_of="2026-11-05",
+            amendment_clauses=recorded,
+        )
+        changed = {clause["clause_type"]: clause for clause in model["changed_clauses"]}
+        unchanged = {clause["clause_type"] for clause in model["unchanged_clauses"]}
+        self.assertIn("Rent Schedule", changed)
+        self.assertIn("$30,656.25/month", changed["Rent Schedule"]["governing_value"])
+        self.assertIn("$37,710.00/month", changed["Rent Schedule"]["governing_value"])
+        self.assertNotIn("$24,000.00/month", changed["Rent Schedule"]["governing_value"])
+        self.assertEqual(changed["Rent Schedule"]["linked_from"], "Base Rent")
+        self.assertIn("fixed dollar rates", changed["Rent Escalations"]["governing_value"])
+        self.assertEqual(changed["Premises Description"]["governing_value"], "13,500 sq ft")
+        self.assertEqual(
+            changed["Renewal Notice Deadline"]["governing_value"],
+            "12 months before the Expiry Date",
+        )
+        self.assertNotIn("Rent Schedule", unchanged)
+        self.assertNotIn("Rent Escalations", unchanged)
+        self.assertNotIn("Premises Description", unchanged)
+        self.assertNotIn("Renewal Notice Deadline", unchanged)
+
+        text = _pdf_text(model)
+        self.assertIn("$30,656.25", text)
+        self.assertIn("13,500 sq ft", text)
+        self.assertIn("12 months before the Expiry Date", text)
+        self.assertIn("linked from Base Rent", text)
+        self.assertIn("$24,000.00 → $30,656.25", text)
+        schedule_b = text.split("Schedule B")[-1]
+        self.assertNotIn("Rent Schedule", schedule_b)
+        self.assertNotIn("9 months before the Expiry Date", schedule_b)
+
 
 if __name__ == "__main__":
     unittest.main()

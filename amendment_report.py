@@ -32,6 +32,7 @@ from reportlab.platypus import (
 )
 
 import config
+from amendment_clause_links import apply_related_clause_updates
 from lease_report import _header_footer
 
 VALUE_STATEMENT = (
@@ -79,19 +80,27 @@ def summarize_clause_change(original: str, governing: str) -> str:
             return "money"
         return "num"
 
-    pairs: List[str] = []
-    used = set()
-    for old in original_nums:
-        old_key = _key(old)
-        for index, new in enumerate(governing_nums):
-            if index in used or _kind(old) != _kind(new):
-                continue
-            if _key(new) != old_key:
-                pairs.append(f"{old.strip()} → {new.strip()}")
-                used.add(index)
+    def _pairs(old_nums: List[str], new_nums: List[str]) -> List[str]:
+        found: List[str] = []
+        used = set()
+        for old in old_nums:
+            old_key = _key(old)
+            for index, new in enumerate(new_nums):
+                if index in used or _kind(old) != _kind(new):
+                    continue
+                if _key(new) != old_key:
+                    found.append(f"{old.strip()} → {new.strip()}")
+                    used.add(index)
+                    break
+            if len(found) >= 3:
                 break
-        if len(pairs) >= 3:
-            break
+        return found
+
+    preferred = _pairs(
+        [token for token in original_nums if _kind(token) in {"money", "pct"}],
+        [token for token in governing_nums if _kind(token) in {"money", "pct"}],
+    )
+    pairs = preferred or _pairs(original_nums, governing_nums)
     if pairs:
         return "; ".join(pairs)
     if original and governing and original != governing:
@@ -313,6 +322,13 @@ def build_amendment_resolution_model(
             }
         )
 
+    clauses = apply_related_clause_updates(clauses)
+    for clause in clauses:
+        if clause.get("changed"):
+            clause["change_summary"] = summarize_clause_change(
+                clause.get("original_value") or "",
+                clause.get("governing_value") or "",
+            )
     changed = [clause for clause in clauses if clause["changed"]]
     unchanged = [clause for clause in clauses if not clause["changed"]]
     for index, clause in enumerate(changed, start=1):
@@ -513,8 +529,13 @@ def generate_amendment_resolution_pdf(model: Dict[str, Any]) -> bytes:
                     body_style,
                 ),
                 Paragraph(
-                    f"{_pdf_text(clause.get('modification_type'))}, "
-                    f"effective {_pdf_text(clause.get('effective_from'))}.",
+                    f"{_pdf_text(clause.get('modification_type'))}"
+                    + (
+                        f", linked from {_pdf_text(clause.get('linked_from'))}"
+                        if clause.get("linked_from")
+                        else ""
+                    )
+                    + f", effective {_pdf_text(clause.get('effective_from'))}.",
                     body_style,
                 ),
                 Spacer(1, 0.06 * inch),

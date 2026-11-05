@@ -15,6 +15,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from extraction_pipeline import LeaseExtractionPipeline
+from amendment_clause_links import expand_related_modifications
 
 
 class AmendmentProcessorV2:
@@ -30,6 +31,7 @@ class AmendmentProcessorV2:
         self.clause_types = [
             # Financial
             "Base Rent",
+            "Rent Schedule",
             "Additional Rent",
             "Percentage Rent",
             "Rent Escalations",
@@ -49,6 +51,7 @@ class AmendmentProcessorV2:
             "Commencement Date",
             "Expiration Date",
             "Renewal Options",
+            "Renewal Notice Deadline",
             "Extension Options",
             "Termination Rights",
             "Early Termination",
@@ -64,6 +67,8 @@ class AmendmentProcessorV2:
             
             # Space & Access
             "Premises Description",
+            "Expansion of Premises",
+            "Proportionate Share",
             "Parking Spaces",
             "Parking Cost",
             "Storage Space",
@@ -180,7 +185,26 @@ class AmendmentProcessorV2:
             extracted_fields, 
             effective_date
         )
+        existing_originals = {}
+        try:
+            history = supabase_client.table("lease_clause_history").select(
+                "clause_type, clause_value"
+            ).eq("lease_id", lease_id).eq("is_current", True).execute()
+            existing_originals = {
+                row.get("clause_type"): row.get("clause_value")
+                for row in (history.data or [])
+                if row.get("clause_type")
+            }
+        except Exception:
+            existing_originals = {}
+        before_count = len(clause_modifications)
+        clause_modifications = expand_related_modifications(
+            clause_modifications,
+            existing_originals,
+        )
         print(f"✓ Found {len(clause_modifications)} clause modification(s)")
+        if len(clause_modifications) > before_count:
+            print(f"   Linked {len(clause_modifications) - before_count} related clause(s)")
         
         if clause_modifications:
             print(f"\n   Clause modifications detected:")
@@ -286,6 +310,9 @@ CRITICAL INSTRUCTIONS:
 - Do NOT summarize - extract the full legal text
 - If the original value is not stated, write "Not stated - amendment only provides new value"
 - Be precise about dates, amounts, percentages, and legal terms
+- If Base Rent / Section 5 is replaced, also emit Rent Schedule (every year) and Rent Escalations (including when a % formula is removed)
+- If premises square footage changes, also emit Premises Description
+- If renewal notice timing changes, emit Renewal Notice Deadline (not only Renewal Options)
 
 AMENDMENT DOCUMENT TEXT ({len(amendment_text_truncated):,} characters):
 ---
