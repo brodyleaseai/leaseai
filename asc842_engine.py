@@ -101,9 +101,21 @@ class ASC842ComplianceEngine:
         """Calculate effective lease term including options."""
         if getattr(self, "explicit_payments", None):
             return len(self.explicit_payments)
+        if not self.commencement_date or not self.end_date:
+            self.errors.append("Commencement date and end date are required.")
+            return 0
+        if self.end_date <= self.commencement_date:
+            self.errors.append(
+                f"End date {self.end_date.strftime('%Y-%m-%d')} is not after "
+                f"commencement {self.commencement_date.strftime('%Y-%m-%d')}."
+            )
+            return 0
 
         base_months = (self.end_date.year - self.commencement_date.year) * 12 + \
                       (self.end_date.month - self.commencement_date.month)
+        if base_months <= 0:
+            self.errors.append("Lease term must be at least one month.")
+            return 0
         
         # Add renewal term if reasonably certain
         if self.has_renewal and self.renewal_certain:
@@ -311,6 +323,19 @@ class ASC842ComplianceEngine:
         
         Columns: Period, Date, Opening Balance, Interest Expense, Payment, Closing Balance
         """
+        empty = pd.DataFrame(columns=[
+            "period",
+            "date",
+            "opening_balance",
+            "interest_expense",
+            "payment",
+            "principal_reduction",
+            "closing_balance",
+        ])
+        if self.lease_term_months <= 0:
+            self.liability_schedule = empty
+            return empty
+
         if self.initial_liability == 0:
             self.calculate_initial_lease_liability()
         
@@ -346,7 +371,7 @@ class ASC842ComplianceEngine:
             
             opening_balance = closing_balance
         
-        df = pd.DataFrame(schedule)
+        df = pd.DataFrame(schedule) if schedule else empty
         self.liability_schedule = df
         return df
     
@@ -356,6 +381,18 @@ class ASC842ComplianceEngine:
         
         Columns: Period, Date, Opening Balance, Depreciation Expense, Accumulated Depreciation, Net Book Value
         """
+        empty = pd.DataFrame(columns=[
+            "period",
+            "date",
+            "opening_balance",
+            "depreciation_expense",
+            "accumulated_depreciation",
+            "net_book_value",
+        ])
+        if self.lease_term_months <= 0:
+            self.rou_schedule = empty
+            return empty
+
         if self.initial_rou_asset == 0:
             self.calculate_initial_rou_asset()
         
@@ -369,7 +406,9 @@ class ASC842ComplianceEngine:
             self.warnings.append(f"Depreciating over useful life ({useful_life_months} months) due to purchase option")
         
         # Straight-line depreciation
-        monthly_depreciation = self.initial_rou_asset / depreciation_months
+        monthly_depreciation = (
+            self.initial_rou_asset / depreciation_months if depreciation_months else 0
+        )
         
         schedule = []
         accumulated_depreciation = 0
@@ -529,8 +568,18 @@ class ASC842ComplianceEngine:
         
         # Calculate totals
         total_future_payments = sum(p['total_payment'] for p in payment_schedule)
-        total_interest = self.liability_schedule['interest_expense'].sum()
-        total_depreciation = self.rou_schedule['depreciation_expense'].sum()
+        liability = self.liability_schedule if self.liability_schedule is not None else pd.DataFrame()
+        rou = self.rou_schedule if self.rou_schedule is not None else pd.DataFrame()
+        total_interest = (
+            liability["interest_expense"].sum()
+            if "interest_expense" in liability.columns and not liability.empty
+            else 0
+        )
+        total_depreciation = (
+            rou["depreciation_expense"].sum()
+            if "depreciation_expense" in rou.columns and not rou.empty
+            else 0
+        )
         
         disclosure = {
             'lease_classification': self.lease_classification,
@@ -556,9 +605,9 @@ class ASC842ComplianceEngine:
             },
             
             'balance_sheet_impact': {
-                'current_liability': round(self.liability_schedule[self.liability_schedule['period'] <= 12]['principal_reduction'].sum(), 2),
-                'non_current_liability': round(self.liability_schedule[self.liability_schedule['period'] > 12]['closing_balance'].iloc[-1], 2) if len(self.liability_schedule) > 12 else 0,
-                'rou_asset_net_book_value': round(self.rou_schedule['net_book_value'].iloc[-1], 2)
+                'current_liability': round(liability[liability['period'] <= 12]['principal_reduction'].sum(), 2) if 'principal_reduction' in liability.columns and not liability.empty else 0,
+                'non_current_liability': round(liability[liability['period'] > 12]['closing_balance'].iloc[-1], 2) if 'closing_balance' in liability.columns and len(liability) > 12 else 0,
+                'rou_asset_net_book_value': round(rou['net_book_value'].iloc[-1], 2) if 'net_book_value' in rou.columns and not rou.empty else 0
             },
             
             'lease_terms': {
@@ -578,6 +627,10 @@ class ASC842ComplianceEngine:
         Returns:
             Dictionary with all calculation results
         """
+        if self.lease_term_months <= 0:
+            message = self.errors[-1] if self.errors else "Lease term is not a positive number of months."
+            raise ValueError(message)
+
         # Step 1: Classify lease
         self.lease_classification, classification_reasons = self.classify_lease()
         

@@ -222,6 +222,22 @@ class RemeasurementTests(unittest.TestCase):
         self.assertEqual(first["initial_liability"], second["initial_liability"])
         self.assertGreater(first["initial_liability"], 0)
 
+    def test_inverted_dates_do_not_crash(self):
+        engine = ASC842ComplianceEngine(
+            {
+                "commencement_date": "2026-01-01",
+                "end_date": "2026-01-01",
+                "monthly_payment": 5000.0,
+                "discount_rate": 0.05,
+            }
+        )
+        self.assertEqual(engine.lease_term_months, 0)
+        with self.assertRaises(ValueError):
+            engine.run_full_calculation()
+        schedule = engine.generate_liability_amortization_schedule()
+        self.assertTrue(schedule.empty)
+        self.assertIn("interest_expense", schedule.columns)
+
     def test_consideration_only_has_no_surrender_gain(self):
         original = escalate_flat_payments(5000, "2024-01-01", "2026-12-01")
         revised = [{"date": row["date"], "amount": 5500.0} for row in original if row["date"] >= "2025-01-01"]
