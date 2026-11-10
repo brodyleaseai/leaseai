@@ -46,6 +46,12 @@ from asc842_amendment import (
 )
 from asc842_cashflows import parse_date
 from asc842_engine import ASC842ComplianceEngine
+from asc842_params import (
+    fields_for_lease,
+    params_from_extracted_fields,
+    source_labels,
+    widget_key,
+)
 
 
 def journal_sides(entry):
@@ -193,6 +199,52 @@ with tab1:
         st.warning("No leases found. Upload a lease first.")
     else:
         
+        try:
+            fields_response = (
+                sb.table("extracted_fields").select("*").eq("lease_id", selected_lease_id).execute()
+            )
+            field_rows = fields_response.data or []
+        except Exception:
+            field_rows = []
+        if not field_rows and selected_lease.get("extracted_data") is None:
+            try:
+                extra = (
+                    sb.table("leases")
+                    .select("extracted_data")
+                    .eq("id", selected_lease_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if extra:
+                    selected_lease["extracted_data"] = extra[0].get("extracted_data")
+            except Exception:
+                pass
+
+        params = params_from_extracted_fields(fields_for_lease(field_rows, selected_lease))
+        loaded_terms = source_labels(params)
+        if params.get("commencement_note"):
+            st.caption(
+                "Commencement uses the first calendar date in the extracted field "
+                "(Phase I if the lease is phased): " + params["commencement_note"]
+            )
+        if loaded_terms:
+            st.info(
+                "Loaded from this lease: "
+                + ", ".join(loaded_terms)
+                + ". You can still edit any value before calculating."
+            )
+        elif field_rows or selected_lease.get("extracted_data"):
+            st.warning(
+                "This lease has extracted fields, but commencement, expiration, or rent "
+                "could not be parsed. Enter those terms below."
+            )
+        else:
+            st.warning(
+                "No extracted terms found for this lease. Review the lease first, or enter the terms below."
+            )
+
         st.markdown("---")
         st.markdown("### Lease Parameters")
         
@@ -200,29 +252,80 @@ with tab1:
         
         with col1:
             st.markdown("**Lease Term**")
-            commencement_date = st.date_input("Commencement Date", value=date.today())
-            end_date = st.date_input("End Date", value=date.today().replace(year=date.today().year + 3))
-            has_renewal = st.checkbox("Has Renewal Option")
+            commencement_date = st.date_input(
+                "Commencement Date",
+                value=params["commencement_date"],
+                key=widget_key(selected_lease_id, "commencement"),
+            )
+            end_date = st.date_input(
+                "End Date",
+                value=params["end_date"],
+                key=widget_key(selected_lease_id, "end"),
+            )
+            has_renewal = st.checkbox(
+                "Has Renewal Option",
+                value=params["has_renewal"],
+                key=widget_key(selected_lease_id, "has_renewal"),
+            )
             if has_renewal:
-                renewal_months = st.number_input("Renewal Term (months)", min_value=1, value=12)
-                renewal_certain = st.checkbox("Renewal Reasonably Certain")
+                renewal_months = st.number_input(
+                    "Renewal Term (months)",
+                    min_value=1,
+                    value=int(params["renewal_months"] or 12),
+                    key=widget_key(selected_lease_id, "renewal_months"),
+                )
+                renewal_certain = st.checkbox(
+                    "Renewal Reasonably Certain",
+                    key=widget_key(selected_lease_id, "renewal_certain"),
+                )
             else:
                 renewal_months = 0
                 renewal_certain = False
         
         with col2:
             st.markdown("**Payment Structure**")
-            monthly_payment = st.number_input("Monthly Payment ($)", min_value=0.0, value=5000.0, step=100.0, format="%.2f")
-            annual_increase = st.number_input("Annual Rent Increase (%)", min_value=0.0, max_value=20.0, value=0.0, step=0.5)
-            has_variable = st.checkbox("Has Variable Payments")
+            monthly_payment = st.number_input(
+                "Monthly Payment ($)",
+                min_value=0.0,
+                value=float(params["monthly_payment"]),
+                step=100.0,
+                format="%.2f",
+                key=widget_key(selected_lease_id, "monthly"),
+            )
+            annual_increase = st.number_input(
+                "Annual Rent Increase (%)",
+                min_value=0.0,
+                max_value=20.0,
+                value=float(params["annual_increase"]),
+                step=0.5,
+                key=widget_key(selected_lease_id, "increase"),
+            )
+            has_variable = st.checkbox(
+                "Has Variable Payments",
+                value=params["has_variable"],
+                key=widget_key(selected_lease_id, "has_variable"),
+            )
             if has_variable:
-                variable_rate = st.number_input("Variable Payment Index Rate (%)", min_value=0.0, value=2.0, step=0.1)
+                variable_rate = st.number_input(
+                    "Variable Payment Index Rate (%)",
+                    min_value=0.0,
+                    value=2.0,
+                    step=0.1,
+                    key=widget_key(selected_lease_id, "variable_rate"),
+                )
             else:
                 variable_rate = 0.0
         
         with col3:
             st.markdown("**Economic Factors**")
-            discount_rate = st.number_input("Incremental Borrowing Rate (%)", min_value=0.0, max_value=20.0, value=5.0, step=0.1)
+            discount_rate = st.number_input(
+                "Incremental Borrowing Rate (%)",
+                min_value=0.0,
+                max_value=20.0,
+                value=5.0,
+                step=0.1,
+                key=widget_key(selected_lease_id, "ibr"),
+            )
             if measurement_mode == MODE_REMEASUREMENT:
                 revised_discount_rate = st.number_input(
                     "Revised IBR at modification (%)",
@@ -231,10 +334,29 @@ with tab1:
                     value=float(discount_rate),
                     step=0.1,
                     help="ASC 842 uses the incremental borrowing rate as of the modification effective date.",
+                    key=widget_key(selected_lease_id, "revised_ibr"),
                 )
-            initial_direct_costs = st.number_input("Initial Direct Costs ($)", min_value=0.0, value=0.0, step=100.0)
-            lease_incentives = st.number_input("Lease Incentives ($)", min_value=0.0, value=0.0, step=100.0)
-            prepayments = st.number_input("Prepayments ($)", min_value=0.0, value=0.0, step=100.0)
+            initial_direct_costs = st.number_input(
+                "Initial Direct Costs ($)",
+                min_value=0.0,
+                value=0.0,
+                step=100.0,
+                key=widget_key(selected_lease_id, "idc"),
+            )
+            lease_incentives = st.number_input(
+                "Lease Incentives ($)",
+                min_value=0.0,
+                value=float(params["lease_incentives"]),
+                step=100.0,
+                key=widget_key(selected_lease_id, "incentives"),
+            )
+            prepayments = st.number_input(
+                "Prepayments ($)",
+                min_value=0.0,
+                value=float(params.get("prepayments", 0.0)),
+                step=100.0,
+                key=widget_key(selected_lease_id, "prepayments"),
+            )
         
         st.markdown("---")
         st.markdown("### Options & Classification")
@@ -242,23 +364,49 @@ with tab1:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            has_purchase = st.checkbox("Has Purchase Option")
+            has_purchase = st.checkbox(
+                "Has Purchase Option",
+                key=widget_key(selected_lease_id, "has_purchase"),
+            )
             if has_purchase:
-                purchase_price = st.number_input("Purchase Price ($)", min_value=0.0, value=100000.0)
-                purchase_certain = st.checkbox("Purchase Reasonably Certain")
+                purchase_price = st.number_input(
+                    "Purchase Price ($)",
+                    min_value=0.0,
+                    value=100000.0,
+                    key=widget_key(selected_lease_id, "purchase_price"),
+                )
+                purchase_certain = st.checkbox(
+                    "Purchase Reasonably Certain",
+                    key=widget_key(selected_lease_id, "purchase_certain"),
+                )
             else:
                 purchase_price = 0.0
                 purchase_certain = False
         
         with col2:
-            has_termination = st.checkbox("Has Termination Option")
+            has_termination = st.checkbox(
+                "Has Termination Option",
+                value=params["has_termination"],
+                key=widget_key(selected_lease_id, "has_termination"),
+            )
             if has_termination:
-                termination_penalty = st.number_input("Termination Penalty ($)", min_value=0.0, value=0.0)
+                termination_penalty = st.number_input(
+                    "Termination Penalty ($)",
+                    min_value=0.0,
+                    value=float(params["termination_penalty"]),
+                    key=widget_key(selected_lease_id, "termination_penalty"),
+                )
             else:
                 termination_penalty = 0.0
         
         with col3:
-            residual_guarantee = st.number_input("Residual Value Guarantee ($)", min_value=0.0, value=0.0, step=1000.0)
+            residual_guarantee = st.number_input(
+                "Residual Value Guarantee ($)",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                key=widget_key(selected_lease_id, "residual"),
+            )
 
         measurement = None
         if measurement_mode == MODE_REMEASUREMENT and stored_amendments:
@@ -314,8 +462,18 @@ with tab1:
         
         st.markdown("---")
         
-        if st.button("🧮 Calculate ASC 842 Compliance", type="primary", width="stretch"):
-            with st.spinner("Running comprehensive ASC 842 compliance calculations..."):
+        if st.button(
+            "🧮 Calculate ASC 842 Compliance",
+            type="primary",
+            width="stretch",
+            key=widget_key(selected_lease_id, "calculate"),
+        ):
+            if commencement_date >= end_date:
+                st.error("End date must be after the commencement date for this lease.")
+            elif monthly_payment <= 0 and measurement_mode == MODE_COMMENCEMENT:
+                st.error("Monthly payment must be greater than zero. Check that this lease extracted a Year 1 base rent.")
+            else:
+              with st.spinner("Running comprehensive ASC 842 compliance calculations..."):
                 try:
                     # Build lease data dictionary
                     lease_data = {
