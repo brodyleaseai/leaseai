@@ -22,6 +22,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 import config
 from amendment_clause_links import (
+    DATE,
     implied_schedule_rsf,
     parse_dollar_rates,
     parse_rate_periods,
@@ -72,9 +73,27 @@ SCHEDULE_MONTHLY = re.compile(
     re.IGNORECASE,
 )
 WHOLE_PREMISES = re.compile(
-    r"entire premises|whole premises|in total|multiplied by|rentable square feet|remaining premises",
+    r"entire premises|whole premises|for the entire|multiplied by|"
+    r"remaining premises",
     re.IGNORECASE,
 )
+EXPANSION_ONLY_RENT = re.compile(
+    r"attributable to the Expansion Space|Expansion Space is charged|"
+    r"Base Rent attributable to the Expansion",
+    re.IGNORECASE,
+)
+ADDITIONAL_RSF = re.compile(
+    r"additional (\d{1,3}(?:,\d{3})+|\d+)\s+"
+    r"(?:rentable square feet|rsf|sq\.?\s*ft|square feet)",
+    re.IGNORECASE,
+)
+EXPANSION_TEASER = re.compile(
+    rf"From\s+(?P<start>{DATE})\s+(?:to|through)\s+(?P<end>{DATE})"
+    rf".{{0,220}}?\$?(?P<rate>\d{{1,3}}(?:\.\d+)?)\s+per rentable square foot",
+    re.IGNORECASE | re.DOTALL,
+)
+PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+LUMP_MONEY = re.compile(r"\$\s?([\d,]+(?:\.\d+)?)")
 
 
 def _clean(value: Any) -> str:
@@ -158,12 +177,171 @@ def _amounts_differ(left: Optional[float], right: Optional[float]) -> bool:
     return abs(left - right) > tolerance
 
 
-def _rate_scope_unclear(base_rent: str, expansion: Optional[dict]) -> bool:
-    if not expansion or not expansion.get("changed"):
+def _rate_scope_unclear(
+    base_rent: str,
+    expansion: Optional[dict],
+    premises: Optional[dict] = None,
+) -> bool:
+    if EXPANSION_ONLY_RENT.search(base_rent or ""):
+        return True
+    premises_text = (premises or {}).get("governing_value") or ""
+    has_expansion = bool(expansion and expansion.get("changed")) or bool(
+        re.search(r"Expansion Space|additional \d", premises_text, re.IGNORECASE)
+    )
+    if not has_expansion:
         return False
     if not parse_dollar_rates(base_rent):
         return False
     return not WHOLE_PREMISES.search(base_rent or "")
+
+
+def _as_date(value: Any) -> Optional[date]:
+    text = _clean(value)
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").date()
+    except ValueError:
+        pass
+    cleaned = re.sub(r"\s+", " ", text)
+    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _full_years(start: date, as_of: date) -> int:
+    years = as_of.year - start.year
+    if (as_of.month, as_of.day) < (start.month, start.day):
+        years -= 1
+    return max(0, years)
+
+
+def _lump_rent(text: str, rsf: Optional[int]) -> Optional[Dict[str, float]]:
+    if not text or not rsf:
+        return None
+    match = LUMP_MONEY.search(text)
+    if not match:
+        return None
+    amount = float(match.group(1).replace(",", ""))
+    if 1 <= amount <= 200:
+        return {
+            "monthly": round(rsf * amount / 12.0, 2),
+            "annual": round(rsf * amount, 2),
+            "psf": amount,
+        }
+    monthly_psf = amount * 12.0 / rsf
+    annual_psf = amount / rsf
+    if 8 <= monthly_psf <= 200:
+        return {"monthly": amount, "annual": round(amount * 12.0, 2), "psf": monthly_psf}
+    if 8 <= annual_psf <= 200:
+        return {"monthly": round(amount / 12.0, 2), "annual": amount, "psf": annual_psf}
+    return None
+
+
+def _escalation_rate(text: str) -> Optional[float]:
+    if not text or re.search(r"fixed dollar|none —", text, re.IGNORECASE):
+        return None
+    match = PERCENT.search(text)
+    if not match:
+        return None
+    return float(match.group(1)) / 100.0
+
+
+def _expansion_rent(
+    premises_text: str,
+    rent_text: str,
+    original_rent: str,
+    original_premises: str,
+    escalations: str,
+    commencement: str,
+    as_of: str,
+) -> Optional[Dict[str, Any]]:
+    """Original premises + expansion area, never expansion rate × total RSF."""
+    if not EXPANSION_ONLY_RENT.search(rent_text or ""):
+        return None
+    total_rsf = parse_rsf(premises_text or "")
+    extra_match = ADDITIONAL_RSF.search(premises_text or "") or ADDITIONAL_RSF.search(
+        rent_text or ""
+    )
+    extra_rsf = int(extra_match.group(1).replace(",", "")) if extra_match else None
+    original_rsf = parse_rsf(original_premises or "")
+    if not original_rsf and total_rsf and extra_rsf:
+        original_rsf = total_rsf - extra_rsf
+    lump = _lump_rent(original_rent or "", original_rsf)
+    if not total_rsf or not extra_rsf or not original_rsf or not lump:
+        return {
+            "review": True,
+            "reason": (
+                "The amendment states an Expansion Space rate. Original premises rent "
+                "and remaining RSF are needed before annual or monthly totals can be calculated. "
+                "Do not multiply the expansion rate by the entire premises."
+            ),
+        }
+
+    as_of_date = _as_date(as_of) or date.today()
+    pct = _escalation_rate(escalations)
+    start = _as_date(commencement)
+    years = _full_years(start, as_of_date) if start and pct else 0
+    factor = (1 + pct) ** years if pct and years else 1.0
+    original_monthly = round(lump["monthly"] * factor, 2)
+    original_psf = lump["psf"] * factor
+
+    teaser = EXPANSION_TEASER.search(rent_text or "")
+    in_teaser = False
+    teaser_rate = None
+    if teaser:
+        teaser_rate = float(teaser.group("rate"))
+        teaser_start = _as_date(teaser.group("start"))
+        teaser_end = _as_date(teaser.group("end"))
+        if teaser_start and teaser_end:
+            in_teaser = teaser_start <= as_of_date <= teaser_end
+
+    flags: List[str] = []
+    if pct:
+        flags.append(
+            "Original Section 5 is a lump Base Rent, not a year-by-year schedule. "
+            "Annual and monthly figures escalate that amount at the governing "
+            "percentage from commencement. Confirm the original rent table if billing requires it."
+        )
+
+    if in_teaser and teaser_rate is not None:
+        expansion_monthly = round(extra_rsf * teaser_rate / 12.0, 2)
+        monthly = round(original_monthly + expansion_monthly, 2)
+        annual = round(monthly * 12.0, 2)
+        increase = (
+            f" ({_money(lump['psf'])}/RSF × {1 + pct:.2f}^{years})"
+            if pct and years
+            else ""
+        )
+        formula = (
+            f"{original_rsf:,} RSF original {_money(original_monthly)}/mo{increase} + "
+            f"{extra_rsf:,} RSF × {_money(teaser_rate)} / RSF / year ÷ 12"
+        )
+    else:
+        annual = round(total_rsf * original_psf, 2)
+        monthly = round(annual / 12.0, 2)
+        if pct and years:
+            formula = (
+                f"{total_rsf:,} RSF × {_money(lump['psf'])} × {1 + pct:.2f}^{years} "
+                f"/ RSF / year (expansion teaser ended; same Section 5 rate as original Premises)"
+            )
+        else:
+            formula = (
+                f"{total_rsf:,} RSF × {_money(original_psf)} / RSF / year "
+                "(expansion teaser ended; same Section 5 rate as original Premises)"
+            )
+    return {
+        "review": False,
+        "annual": annual,
+        "monthly": monthly,
+        "formula": formula,
+        "flags": flags,
+        "rsf": total_rsf,
+        "expansion_rsf": extra_rsf,
+    }
 
 
 def _row(
@@ -223,13 +401,31 @@ def build_current_lease_position(resolution: Optional[dict]) -> Dict[str, Any]:
     base_rent = _first_clause(clauses, ("Base Rent",))
     schedule = _first_clause(clauses, ("Rent Schedule",))
     expansion = clauses.get("Expansion of Premises")
+    commencement = _first_clause(clauses, ("Commencement Date", "Lease Commencement Date"))
+    escalations = _first_clause(clauses, ("Rent Escalations",))
     premises_text = (premises or {}).get("governing_value") or ""
     rent_text = (base_rent or {}).get("governing_value") or ""
     schedule_text = (schedule or {}).get("governing_value") or ""
     rsf = _current_rsf(premises_text, rent_text, schedule_text)
     rate = _current_rate(rent_text, schedule_text)
-    computed_annual = round(rsf * rate, 2) if rsf and rate else None
-    computed_monthly = round(computed_annual / 12.0, 2) if computed_annual is not None else None
+    as_of_value = model.get("as_of") or date.today().isoformat()
+    expansion_rent = _expansion_rent(
+        premises_text,
+        rent_text,
+        (base_rent or {}).get("original_value") or "",
+        (premises or {}).get("original_value") or "",
+        (escalations or {}).get("governing_value") or "",
+        (commencement or {}).get("governing_value") or "",
+        as_of_value,
+    )
+    if expansion_rent and not expansion_rent.get("review"):
+        # Expansion Space rate is not a whole-premises rate.
+        computed_annual = expansion_rent["annual"]
+        computed_monthly = expansion_rent["monthly"]
+        rate = None
+    else:
+        computed_annual = round(rsf * rate, 2) if rsf and rate else None
+        computed_monthly = round(computed_annual / 12.0, 2) if computed_annual is not None else None
     schedule_monthly = _schedule_monthly(schedule_text)
     stated_monthly = _money_value(STATED_MONTHLY.search(rent_text))
     stated_annual = _money_value(STATED_ANNUAL.search(rent_text))
@@ -246,13 +442,55 @@ def build_current_lease_position(resolution: Optional[dict]) -> Dict[str, Any]:
     )
     previous_rent = _clean((base_rent or {}).get("original_value")) if (base_rent or {}).get("changed") else ""
 
-    if _rate_scope_unclear(rent_text, expansion):
+    if expansion_rent and expansion_rent.get("review"):
+        flags.append(expansion_rent["reason"])
+    elif _rate_scope_unclear(rent_text, expansion, premises) and not (
+        expansion_rent and not expansion_rent.get("review")
+    ):
         flags.append(
             "The governing rent rate does not clearly say it applies to the entire "
             "premises. Confirm whether the new rate covers all RSF or only an expansion area."
         )
 
-    if rate and not rsf:
+    if expansion_rent and expansion_rent.get("review"):
+        rows.append(
+            _row(
+                "Annual Base Rent",
+                "Not calculated — expansion rate is not whole-premises rent",
+                previous_rent,
+                effective,
+                STATUS_REVIEW,
+                "Need original Premises rent + Expansion Space rent",
+                calc_source,
+                review=True,
+            )
+        )
+    elif expansion_rent and not expansion_rent.get("review"):
+        flags.extend(expansion_rent.get("flags") or [])
+        rows.append(
+            _row(
+                "Annual Base Rent",
+                _money(expansion_rent["annual"]),
+                previous_rent,
+                effective,
+                STATUS_CALCULATED,
+                expansion_rent["formula"],
+                calc_source,
+                "Derived calculation, not a dollar amount expressly stated in the amendment.",
+            )
+        )
+        rows.append(
+            _row(
+                "Monthly Base Rent",
+                _money(expansion_rent["monthly"]),
+                "",
+                effective,
+                STATUS_CALCULATED,
+                f"{expansion_rent['formula']} → {_money(expansion_rent['monthly'])}/mo",
+                calc_source,
+            )
+        )
+    elif rate and not rsf:
         flags.append(
             "A governing rent rate was found, but premises RSF is missing, so annual "
             "and monthly rent were not calculated."

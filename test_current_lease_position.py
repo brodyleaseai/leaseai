@@ -232,5 +232,231 @@ class ReviewFlagTests(unittest.TestCase):
         self.assertTrue(any("does not match" in flag for flag in model["review_flags"]))
 
 
+HARBOURVIEW_PREMISES = (
+    "Effective October 1, 2025 (the “Expansion Effective Date”), Landlord leases to Tenant "
+    "an additional 2,400 rentable square feet on the fourth floor, identified as Suite 415 "
+    "on Exhibit A (the “Expansion Space”). From that date, the Premises comprise 20,400 "
+    "rentable square feet in total."
+)
+HARBOURVIEW_RENT = (
+    "From October 1, 2025 through March 31, 2026, Base Rent attributable to the Expansion "
+    "Space is $28.50 per rentable square foot per annum. From April 1, 2026 onward, the "
+    "Expansion Space is charged at the same per-square-foot rate applicable to the original "
+    "Premises under Section 5, as amended in writing."
+)
+HARBOURVIEW_DEPOSIT = (
+    "Within five business days after execution, Tenant shall pay an additional deposit of "
+    "$14,400.00. The total Deposit held under Section 7 shall then be $122,400.00."
+)
+HARBOURVIEW_SHARE = (
+    "Effective October 1, 2025, Tenant’s proportionate share increases from 18.00% to "
+    "20.40%, calculated as 20,400 square feet divided by 100,000 square feet."
+)
+
+
+def _harbourview_resolution(as_of: str):
+    return build_amendment_resolution_model(
+        {
+            "property_address": "4100 Harbourview Parkway",
+            "tenant_name": "Pacific Arc Robotics",
+        },
+        [
+            {
+                "amendment_id": "amd-1",
+                "amendment_number": 1,
+                "amendment_date": "2025-08-12",
+                "effective_date": "2025-10-01",
+                "status": "READY FOR REVIEW",
+                "modified_clauses": [
+                    "Base Rent",
+                    "Premises Description",
+                    "Proportionate Share",
+                    "Security Deposit",
+                ],
+            }
+        ],
+        [
+            {
+                "clause_type": "Base Rent",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$39,750.00",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_RENT,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "ADDS",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "18,000 sq ft",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_PREMISES,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Proportionate Share",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "Tenant’s proportionate share is 18.00%.",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Proportionate Share",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_SHARE,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "SUPERSEDES",
+            },
+            {
+                "clause_type": "Security Deposit",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$108,000.00",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Security Deposit",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_DEPOSIT,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Commencement Date",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "2024-04-01",
+                "is_current": True,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Rent Escalations",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "3%",
+                "is_current": True,
+                "effective_from": "2024-04-01",
+            },
+        ],
+        as_of=as_of,
+        prepared_for="Brody Kitsch",
+        amendment_clauses=[
+            {
+                "amendment_id": "amd-1",
+                "clause_type": "Base Rent",
+                "modification_type": "ADDS",
+                "original_value": "$39,750.00",
+                "new_value": HARBOURVIEW_RENT,
+                "effective_date": "2025-10-01",
+            },
+            {
+                "amendment_id": "amd-1",
+                "clause_type": "Premises Description",
+                "modification_type": "MODIFIES",
+                "original_value": "18,000 sq ft",
+                "new_value": HARBOURVIEW_PREMISES,
+                "effective_date": "2025-10-01",
+            },
+            {
+                "amendment_id": "amd-1",
+                "clause_type": "Proportionate Share",
+                "modification_type": "SUPERSEDES",
+                "original_value": "Tenant’s proportionate share is 18.00%.",
+                "new_value": HARBOURVIEW_SHARE,
+                "effective_date": "2025-10-01",
+            },
+            {
+                "amendment_id": "amd-1",
+                "clause_type": "Security Deposit",
+                "modification_type": "MODIFIES",
+                "original_value": "$108,000.00",
+                "new_value": HARBOURVIEW_DEPOSIT,
+                "effective_date": "2025-10-01",
+            },
+        ],
+    )
+
+
+class HarbourviewExpansionTests(unittest.TestCase):
+    """4100 Harbourview Parkway First Amendment — expansion, not a whole-premises reprice."""
+
+    def test_abstract_summaries_match_the_amendment(self):
+        resolution = _harbourview_resolution("2026-11-10")
+        changed = {clause["clause_type"]: clause for clause in resolution["changed_clauses"]}
+        self.assertEqual(changed["Premises Description"]["change_summary"], "18,000 → 20,400")
+        self.assertEqual(
+            changed["Security Deposit"]["change_summary"],
+            "$108,000.00 → $122,400.00",
+        )
+        self.assertEqual(changed["Proportionate Share"]["change_summary"], "18.00% → 20.40%")
+        self.assertNotEqual(changed["Base Rent"]["change_summary"], "$39,750.00 → $28.50")
+        self.assertNotIn("18,000 → 1", changed["Premises Description"]["change_summary"])
+        self.assertNotIn("$14,400", changed["Security Deposit"]["change_summary"].split("→")[-1])
+        schedule = changed.get("Rent Schedule")
+        if schedule:
+            self.assertNotIn("20,400 RSF", schedule["governing_value"] or "")
+            self.assertNotIn("$48,450", schedule["governing_value"] or "")
+
+    def test_teaser_period_adds_expansion_rent_to_original(self):
+        model = build_current_lease_position(_harbourview_resolution("2025-12-01"))
+        rows = _rows(model)
+        # Year-2 original: $39,750 × 1.03 = $40,942.50/mo. Expansion: 2,400 × $28.50 / 12 = $5,700.
+        self.assertEqual(rows["Monthly Base Rent"]["current_value"], "$46,642.50")
+        self.assertEqual(rows["Annual Base Rent"]["current_value"], "$559,710.00")
+        self.assertEqual(rows["Annual Base Rent"]["status"], STATUS_CALCULATED)
+        self.assertIn("2,400", rows["Annual Base Rent"]["calculation"])
+        self.assertIn("$28.50", rows["Annual Base Rent"]["calculation"])
+        self.assertNotEqual(rows["Annual Base Rent"]["current_value"], "$581,400.00")
+        self.assertNotEqual(rows["Monthly Base Rent"]["current_value"], "$48,450.00")
+
+    def test_after_teaser_uses_section_5_rate_on_total_rsf(self):
+        model = build_current_lease_position(_harbourview_resolution("2026-11-10"))
+        rows = _rows(model)
+        # $26.50 × 1.03^2 = $28.11385 / RSF on 20,400 RSF. Not 20,400 × $28.50.
+        expected_annual = round(20400 * 26.50 * (1.03 ** 2), 2)
+        expected_monthly = round(expected_annual / 12.0, 2)
+        self.assertEqual(rows["Annual Base Rent"]["current_value"], f"${expected_annual:,.2f}")
+        self.assertEqual(rows["Monthly Base Rent"]["current_value"], f"${expected_monthly:,.2f}")
+        self.assertNotEqual(rows["Annual Base Rent"]["current_value"], "$581,400.00")
+        self.assertNotEqual(rows["Monthly Base Rent"]["current_value"], "$48,450.00")
+        self.assertIn("20,400", rows["Annual Base Rent"]["calculation"])
+        self.assertIn("expansion teaser ended", rows["Annual Base Rent"]["calculation"])
+        self.assertEqual(rows["Premises / RSF"]["status"], STATUS_AMENDED)
+        self.assertIn("20,400", rows["Premises / RSF"]["current_value"])
+        self.assertIn("122,400.00", rows["Security Deposit"]["current_value"])
+        self.assertIn("20.40%", rows["Proportionate Share"]["current_value"])
+        text = _pdf_text(model)
+        self.assertIn("Current Lease Position", text)
+        self.assertNotIn("$581,400.00", text)
+        self.assertIn("$122,400.00", text)
+
+
 if __name__ == "__main__":
     unittest.main()

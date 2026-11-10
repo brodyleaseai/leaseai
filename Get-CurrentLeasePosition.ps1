@@ -16,6 +16,8 @@ function Save-RepoFile([string]$RelPath) {
 }
 
 Save-RepoFile "current_lease_position.py"
+Save-RepoFile "amendment_report.py"
+Save-RepoFile "amendment_clause_links.py"
 Save-RepoFile "email_delivery.py"
 Save-RepoFile "pages/3_%F0%9F%94%97_Amendment_Graph.py"
 
