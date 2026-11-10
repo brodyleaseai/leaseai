@@ -10,6 +10,7 @@ from current_lease_position import (
     STATUS_EXTRACTED,
     STATUS_REVIEW,
     build_current_lease_position,
+    build_position_from_graph,
     generate_current_lease_position_pdf,
     position_filename,
 )
@@ -456,6 +457,197 @@ class HarbourviewExpansionTests(unittest.TestCase):
         self.assertIn("Current Lease Position", text)
         self.assertNotIn("$581,400.00", text)
         self.assertIn("$122,400.00", text)
+
+
+HARBOURVIEW_SECOND_RENT = (
+    "From November 1, 2026, Tenant shall pay annual Base Rent for the entire Premises, "
+    "comprising 20,400 rentable square feet, at $29.00 per rentable square foot per annum."
+)
+
+
+def _harbourview_two_amendment_inputs():
+    first = _harbourview_resolution("2026-11-10")
+    amendments = list(first["amendments"]) + [
+        {
+            "amendment_id": "amd-2",
+            "amendment_number": 2,
+            "amendment_date": "2026-11-10",
+            "effective_date": "2026-11-01",
+            "status": "READY FOR REVIEW",
+            "modified_clauses": ["Base Rent"],
+        }
+    ]
+    history = [
+        row
+        for row in [
+            {
+                "clause_type": "Base Rent",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$39,750.00",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_RENT,
+                # Stale flag: first amendment still marked current.
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "ADDS",
+            },
+            {
+                "clause_type": "Base Rent",
+                "version_number": 2,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-2",
+                "clause_value": HARBOURVIEW_SECOND_RENT,
+                "is_current": False,
+                "effective_from": "2026-11-01",
+                "modification_type": "SUPERSEDES",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "18,000 sq ft",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Premises Description",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_PREMISES,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Proportionate Share",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "Tenant’s proportionate share is 18.00%.",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Proportionate Share",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_SHARE,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "SUPERSEDES",
+            },
+            {
+                "clause_type": "Security Deposit",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "$108,000.00",
+                "is_current": False,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Security Deposit",
+                "version_number": 1,
+                "source_document_type": "AMENDMENT",
+                "source_document_id": "amd-1",
+                "clause_value": HARBOURVIEW_DEPOSIT,
+                "is_current": True,
+                "effective_from": "2025-10-01",
+                "modification_type": "MODIFIES",
+            },
+            {
+                "clause_type": "Commencement Date",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "2024-04-01",
+                "is_current": True,
+                "effective_from": "2024-04-01",
+            },
+            {
+                "clause_type": "Rent Escalations",
+                "version_number": 0,
+                "source_document_type": "BASE_LEASE",
+                "clause_value": "3%",
+                "is_current": True,
+                "effective_from": "2024-04-01",
+            },
+        ]
+    ]
+    recorded = [
+        {
+            "amendment_id": "amd-1",
+            "amendment_number": 1,
+            "clause_type": "Base Rent",
+            "modification_type": "ADDS",
+            "original_value": "$39,750.00",
+            "new_value": HARBOURVIEW_RENT,
+            "effective_date": "2025-10-01",
+        },
+        {
+            "amendment_id": "amd-2",
+            "amendment_number": 2,
+            "clause_type": "Base Rent",
+            "modification_type": "SUPERSEDES",
+            "original_value": HARBOURVIEW_RENT,
+            "new_value": HARBOURVIEW_SECOND_RENT,
+            "effective_date": None,
+        },
+        {
+            "amendment_id": "amd-1",
+            "amendment_number": 1,
+            "clause_type": "Premises Description",
+            "modification_type": "MODIFIES",
+            "original_value": "18,000 sq ft",
+            "new_value": HARBOURVIEW_PREMISES,
+            "effective_date": "2025-10-01",
+        },
+    ]
+    lease = {
+        "property_address": "4100 Harbourview Parkway",
+        "tenant_name": "Pacific Arc Robotics",
+    }
+    return lease, amendments, history, recorded
+
+
+class HarbourviewSecondAmendmentTests(unittest.TestCase):
+    def test_position_uses_amendment_two_not_only_the_first(self):
+        lease, amendments, history, recorded = _harbourview_two_amendment_inputs()
+        model = build_position_from_graph(
+            lease,
+            amendments,
+            history,
+            as_of="2026-11-10",
+            prepared_for="Brody Kitsch",
+            amendment_clauses=recorded,
+        )
+        rows = _rows(model)
+        self.assertEqual(model["value"]["amendments_resolved"], 2)
+        self.assertIn("20,400", rows["Premises / RSF"]["current_value"])
+        self.assertIn("$29.00", rows["Base Rent (stated)"]["current_value"])
+        self.assertNotIn("Expansion Space is $28.50", rows["Base Rent (stated)"]["current_value"])
+        self.assertEqual(rows["Annual Base Rent"]["current_value"], "$591,600.00")
+        self.assertEqual(rows["Monthly Base Rent"]["current_value"], "$49,300.00")
+        self.assertEqual(rows["Annual Base Rent"]["status"], STATUS_CALCULATED)
+        text = _pdf_text(model)
+        self.assertIn("$591,600.00", text)
+        self.assertNotIn("$573,522.54", text)
+
+
+class AmendmentNumberOverrideTests(unittest.TestCase):
+    def test_ui_amendment_number_beats_extracted_first(self):
+        from amendment_processor_v2 import AmendmentProcessorV2
+
+        processor = AmendmentProcessorV2.__new__(AmendmentProcessorV2)
+        self.assertEqual(processor._parse_amendment_number({"value": "First Amendment"}), 1)
+        self.assertEqual(processor._parse_amendment_number({"value": "Second Amendment"}), 2)
 
 
 if __name__ == "__main__":

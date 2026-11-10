@@ -217,14 +217,30 @@ def _amendment_lookup(amendments: Iterable[dict]) -> Dict[str, dict]:
     return lookup
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _row_when_iso(row: Optional[dict]) -> str:
+    if not row:
+        return ""
+    for key in ("effective_from", "effective_date", "amendment_date", "created_at"):
+        text = _clean(row.get(key))
+        if text:
+            return text[:10]
+    return ""
+
+
+def _version_rank(row: dict) -> tuple:
+    """Latest row: higher version wins, then later date. Ignore stale is_current flags."""
+    return (_as_int(row.get("version_number")), _row_when_iso(row))
+
+
 def _sort_versions(rows: Iterable[dict]) -> List[dict]:
-    return sorted(
-        rows,
-        key=lambda row: (
-            row.get("version_number") is None,
-            row.get("version_number") if isinstance(row.get("version_number"), int) else 0,
-        ),
-    )
+    return sorted(rows, key=_version_rank)
 
 
 def abstract_filename(model: Dict[str, Any]) -> str:
@@ -250,7 +266,13 @@ _CHANGE_TYPES = {
 def _clause_change_lookup(amendment_clauses: Optional[Iterable[dict]]) -> Dict[str, dict]:
     lookup: Dict[str, dict] = {}
     rows = [row for row in (amendment_clauses or []) if row.get("clause_type")]
-    rows.sort(key=lambda row: str(row.get("effective_date") or row.get("created_at") or ""))
+    rows.sort(
+        key=lambda row: (
+            _row_when_iso(row) or "9999-12-31",
+            _as_int(row.get("amendment_number")),
+            _as_int(row.get("version_number")),
+        )
+    )
     for row in rows:
         lookup[row["clause_type"]] = row
     return lookup
@@ -349,11 +371,11 @@ def build_amendment_resolution_model(
             (
                 row
                 for row in versions
-                if row.get("source_document_type") == "BASE_LEASE" or row.get("version_number") == 0
+                if row.get("source_document_type") == "BASE_LEASE" or _as_int(row.get("version_number")) == 0
             ),
             versions[0],
         )
-        current = next((row for row in versions if row.get("is_current")), versions[-1])
+        current = versions[-1]
         original_value, governing_value = _resolve_clause_values(
             _clean(original.get("clause_value")),
             _clean(current.get("clause_value")),

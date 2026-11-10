@@ -4,6 +4,7 @@ import unittest
 from io import BytesIO
 
 from amendment_report import (
+    _clause_change_lookup,
     abstract_filename,
     amendment_label,
     build_amendment_resolution_model,
@@ -120,6 +121,27 @@ class ModelTests(unittest.TestCase):
             "$2,500.00 → $1,500.00",
         )
         self.assertEqual(amendment_label(1, "2025-01-02"), "Amendment No. 1 (2025-01-02)")
+
+    def test_later_amendment_wins_even_when_its_effective_date_is_missing(self):
+        lookup = _clause_change_lookup(
+            [
+                {
+                    "amendment_id": "amd-1",
+                    "amendment_number": 1,
+                    "clause_type": "Base Rent",
+                    "new_value": "first",
+                    "effective_date": "2025-10-01",
+                },
+                {
+                    "amendment_id": "amd-2",
+                    "amendment_number": 2,
+                    "clause_type": "Base Rent",
+                    "new_value": "second",
+                    "effective_date": None,
+                },
+            ]
+        )
+        self.assertEqual(lookup["Base Rent"]["new_value"], "second")
 
     def test_harbourview_summaries_use_total_rsf_deposit_not_first_number(self):
         premises = (

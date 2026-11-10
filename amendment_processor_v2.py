@@ -114,7 +114,8 @@ class AmendmentProcessorV2:
         pdf_path: str,
         lease_id: str,
         supabase_client,
-        filename: str = None
+        filename: str = None,
+        amendment_number: Optional[int] = None,
     ) -> Tuple[str, Dict]:
         """
         Process an amendment document and link it to its base lease.
@@ -167,7 +168,10 @@ class AmendmentProcessorV2:
         
         # Step 5: Create amendment record
         print(f"\n[5/8] Creating amendment record in database...")
-        amendment_number = self._parse_amendment_number(extracted_fields.get("Amendment Number", {}))
+        amendment_number = self._resolve_amendment_number(
+            extracted_fields.get("Amendment Number", {}),
+            amendment_number,
+        )
         amendment_date = self._parse_date(extracted_fields.get("Amendment Date", {}))
         effective_date = self._parse_date(extracted_fields.get("Effective Date", {})) or amendment_date
         
@@ -606,6 +610,14 @@ RETURN ONLY THE JSON OBJECT. No additional text or explanation.
                     {"is_current": True, "effective_to": None}
                 ).eq("id", remaining.data[0]["id"]).execute()
     
+    def _resolve_amendment_number(self, field_data, override=None) -> int:
+        parsed = self._parse_amendment_number(field_data)
+        try:
+            override_number = int(override) if override not in (None, "") else None
+        except (TypeError, ValueError):
+            override_number = None
+        return override_number or parsed
+
     def _parse_amendment_number(self, field_data) -> int:
         """Parse amendment number from field data."""
         if isinstance(field_data, dict):

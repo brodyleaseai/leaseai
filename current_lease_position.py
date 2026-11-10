@@ -589,16 +589,16 @@ def build_position_from_graph(
     prepared_for: Optional[str] = None,
     amendment_clauses: Optional[Iterable[dict]] = None,
 ) -> Dict[str, Any]:
-    """Resolve the graph as of a date, then build the position report."""
-    from asc842_amendment import resolution_as_of
+    """Build Current Position from the same full amendment chain as the Abstract."""
+    from amendment_report import build_amendment_resolution_model
 
-    resolution = resolution_as_of(
+    resolution = build_amendment_resolution_model(
         lease,
-        amendments,
+        list(amendments or []),
         history_rows,
-        as_of or date.today().isoformat(),
-        amendment_clauses=amendment_clauses,
+        as_of=as_of or date.today().isoformat(),
         prepared_for=prepared_for,
+        amendment_clauses=amendment_clauses,
     )
     return build_current_lease_position(resolution)
 

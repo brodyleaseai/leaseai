@@ -16,7 +16,7 @@ from amendment_graph_helpers import (
     lease_option_label,
     sync_prepared_for,
 )
-from asc842_amendment import enrich_lease_client
+from asc842_amendment import enrich_lease_client, load_amendment_bundle
 from amendment_report import (
     abstract_filename,
     build_amendment_resolution_model,
@@ -141,17 +141,24 @@ def process_amendment_upload(uploaded_file, lease_id: str) -> None:
             from amendment_processor_v2 import AmendmentProcessorV2
 
             processor = AmendmentProcessorV2()
+            number_key = f"tab_amendment_number_{lease_id}"
+            ui_number = st.session_state.get(number_key)
             amendment_id, extracted_fields = processor.process_amendment(
                 pdf_path=tmp_path,
                 lease_id=lease_id,
                 supabase_client=sb,
                 filename=uploaded_file.name,
+                amendment_number=ui_number,
             )
             st.success("✅ Amendment processed successfully!")
             st.success(f"Amendment ID: {amendment_id}")
             st.caption("If this amendment number was already on the lease, the previous extract was replaced.")
             st.markdown("### 📊 Extraction Results")
             st.json(extracted_fields)
+            try:
+                st.session_state[f"{lease_id}_next_amendment_number"] = int(ui_number or 1) + 1
+            except (TypeError, ValueError):
+                st.session_state[f"{lease_id}_next_amendment_number"] = 2
             st.info("💡 Go to the **Amendment Chain** tab to see the updated amendment chain!")
         except Exception as e:
             st.error(f"❌ Error processing amendment: {str(e)}")
@@ -163,59 +170,36 @@ def process_amendment_upload(uploaded_file, lease_id: str) -> None:
 
 def fetch_graph_report_inputs(lease_id: str):
     """Load clause history, amendment chain, and recorded clause changes."""
+    bundle = load_amendment_bundle(sb, lease_id)
     errors = []
-    history = []
-    amendments = []
+    if bundle.get("load_error"):
+        errors.append(f"Could not load amendment chain for the report: {bundle['load_error']}")
+    amendments = bundle.get("amendments") or []
+    by_id = {
+        str(row.get("amendment_id") or row.get("id")): row
+        for row in amendments
+        if row.get("amendment_id") or row.get("id")
+    }
     clause_changes = []
+    for row in bundle.get("amendment_clauses") or []:
+        stamped = dict(row)
+        parent = by_id.get(str(row.get("amendment_id") or ""))
+        if parent and parent.get("amendment_number") is not None:
+            stamped["amendment_number"] = parent["amendment_number"]
+        clause_changes.append(stamped)
+    return bundle.get("history") or [], amendments, clause_changes, errors
+
+
+def _next_amendment_number(lease_id: str) -> int:
     try:
-        history = (
-            sb.table("lease_clause_history")
-            .select("*")
-            .eq("lease_id", lease_id)
-            .execute()
-            .data
-            or []
-        )
-    except Exception as exc:
-        errors.append(f"Could not load clause history for the report: {exc}")
-    try:
-        amendments = (
-            sb.rpc("get_amendment_chain", {"p_lease_id": lease_id}).execute().data or []
-        )
-    except Exception as exc:
-        errors.append(f"Could not load amendment chain for the report: {exc}")
-    for amendment in amendments:
-        amendment_id = amendment.get("amendment_id")
-        if not amendment_id:
-            continue
-        try:
-            clause_changes.extend(
-                sb.table("amendment_clauses")
-                .select("*")
-                .eq("amendment_id", amendment_id)
-                .execute()
-                .data
-                or []
-            )
-        except Exception as exc:
-            errors.append(f"Could not load recorded amendment clauses: {exc}")
-        try:
-            full = (
-                sb.table("amendments")
-                .select("extracted_data, effective_date")
-                .eq("id", amendment_id)
-                .limit(1)
-                .execute()
-                .data
-                or []
-            )
-            if full:
-                amendment["extracted_data"] = full[0].get("extracted_data")
-                if full[0].get("effective_date") and not amendment.get("effective_date"):
-                    amendment["effective_date"] = full[0]["effective_date"]
-        except Exception:
-            pass
-    return history, amendments, clause_changes, errors
+        bundle = load_amendment_bundle(sb, lease_id)
+        numbers = [
+            int(row.get("amendment_number") or 0)
+            for row in bundle.get("amendments") or []
+        ]
+        return max(numbers) + 1 if numbers else 1
+    except Exception:
+        return 1
 
 
 def render_amendment_upload(lease_id: str, key_prefix: str) -> None:
@@ -226,14 +210,20 @@ def render_amendment_upload(lease_id: str, key_prefix: str) -> None:
         help="Upload the amendment or addendum document (PDF format)",
         key=f"{key_prefix}_amendment_pdf_{lease_id}",
     )
+    number_key = f"{key_prefix}_amendment_number_{lease_id}"
+    next_number = _next_amendment_number(lease_id)
+    pending = st.session_state.pop(f"{lease_id}_next_amendment_number", None)
+    if pending:
+        st.session_state[number_key] = pending
+    elif number_key not in st.session_state:
+        st.session_state[number_key] = next_number
     col1, col2 = st.columns(2)
     with col1:
         st.number_input(
             "Amendment Number",
             min_value=1,
-            value=1,
-            help="1st Amendment, 2nd Amendment, etc.",
-            key=f"{key_prefix}_amendment_number_{lease_id}",
+            help="1st Amendment, 2nd Amendment, etc. Defaults to the next number on this lease.",
+            key=number_key,
         )
     with col2:
         st.date_input(
@@ -761,6 +751,15 @@ with tab6:
     st.caption(
         f"Position as of {position_value['as_of']} · Prepared for {position_value['prepared_for']}"
     )
+    if amendments:
+        labels = []
+        for amendment in amendments:
+            number = amendment.get("amendment_number") or "?"
+            when = amendment.get("effective_date") or amendment.get("amendment_date") or ""
+            labels.append(f"No. {number}" + (f" ({when})" if when else ""))
+        st.caption("Chain applied: " + ", ".join(labels))
+    else:
+        st.caption("No amendments are on file yet. The original lease terms govern.")
 
     if position_model["review_flags"]:
         st.warning("Review required before relying on a calculated total:")
