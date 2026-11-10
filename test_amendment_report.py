@@ -4,6 +4,7 @@ import unittest
 from io import BytesIO
 
 from amendment_report import (
+    _clause_change_lookup,
     abstract_filename,
     amendment_label,
     build_amendment_resolution_model,
@@ -120,6 +121,59 @@ class ModelTests(unittest.TestCase):
             "$2,500.00 → $1,500.00",
         )
         self.assertEqual(amendment_label(1, "2025-01-02"), "Amendment No. 1 (2025-01-02)")
+
+    def test_later_amendment_wins_even_when_its_effective_date_is_missing(self):
+        lookup = _clause_change_lookup(
+            [
+                {
+                    "amendment_id": "amd-1",
+                    "amendment_number": 1,
+                    "clause_type": "Base Rent",
+                    "new_value": "first",
+                    "effective_date": "2025-10-01",
+                },
+                {
+                    "amendment_id": "amd-2",
+                    "amendment_number": 2,
+                    "clause_type": "Base Rent",
+                    "new_value": "second",
+                    "effective_date": None,
+                },
+            ]
+        )
+        self.assertEqual(lookup["Base Rent"]["new_value"], "second")
+
+    def test_harbourview_summaries_use_total_rsf_deposit_not_first_number(self):
+        premises = (
+            "Effective October 1, 2025 (the “Expansion Effective Date”), Landlord leases "
+            "to Tenant an additional 2,400 rentable square feet on the fourth floor, "
+            "identified as Suite 415 on Exhibit A (the “Expansion Space”). From that date, "
+            "the Premises comprise 20,400 rentable square feet in total."
+        )
+        rent = (
+            "From October 1, 2025 through March 31, 2026, Base Rent attributable to the "
+            "Expansion Space is $28.50 per rentable square foot per annum. From April 1, "
+            "2026 onward, the Expansion Space is charged at the same per-square-foot rate "
+            "applicable to the original Premises under Section 5, as amended in writing."
+        )
+        deposit = (
+            "Within five business days after execution, Tenant shall pay an additional "
+            "deposit of $14,400.00. The total Deposit held under Section 7 shall then "
+            "be $122,400.00."
+        )
+        share = (
+            "Effective October 1, 2025, Tenant’s proportionate share increases from "
+            "18.00% to 20.40%, calculated as 20,400 square feet divided by 100,000 "
+            "square feet."
+        )
+        self.assertEqual(summarize_clause_change("18,000 sq ft", premises), "18,000 → 20,400")
+        self.assertEqual(summarize_clause_change("$108,000.00", deposit), "$108,000.00 → $122,400.00")
+        self.assertEqual(summarize_clause_change("18.00%", share), "18.00% → 20.40%")
+        rent_summary = summarize_clause_change("$39,750.00", rent)
+        self.assertNotIn("$39,750.00 → $28.50", rent_summary)
+        self.assertIn("Expansion Space", rent_summary)
+        self.assertIn("$28.50", rent_summary)
+        self.assertIn("original Premises continue", rent_summary)
 
     def test_recovers_co_diagnostics_changes_when_history_collapsed(self):
         """Exhibit A listed 3 modifications; Schedule A must not drop CAM/Holdover."""

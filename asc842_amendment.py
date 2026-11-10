@@ -9,7 +9,7 @@ rent schedule as of a date and either:
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from amendment_clause_links import parse_rsf
@@ -70,6 +70,7 @@ def _amendment_when(amendment: dict) -> Optional[str]:
         amendment.get("effective_date")
         or amendment.get("amendment_date")
         or amendment.get("effective_from")
+        or amendment.get("created_at")
     )
 
 
@@ -78,7 +79,20 @@ def _row_when(row: dict) -> Optional[str]:
         row.get("effective_from")
         or row.get("effective_date")
         or row.get("amendment_date")
+        or row.get("created_at")
     )
+
+
+def _version_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _history_rank(row: dict) -> tuple:
+    when = parse_date(_row_when(row))
+    return (_version_int(row.get("version_number")), when or datetime.min)
 
 
 def history_as_of(rows: Optional[Iterable[dict]], as_of: Any) -> List[dict]:
@@ -96,8 +110,7 @@ def history_as_of(rows: Optional[Iterable[dict]], as_of: Any) -> List[dict]:
         if not name:
             continue
         prior = latest.get(name)
-        prior_num = -1 if prior is None else (kept[prior].get("version_number") or 0)
-        if prior is None or (row.get("version_number") or 0) >= prior_num:
+        if prior is None or _history_rank(row) >= _history_rank(kept[prior]):
             latest[name] = index
     for index, row in enumerate(kept):
         row["is_current"] = latest.get(row.get("clause_type")) == index

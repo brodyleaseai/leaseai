@@ -162,5 +162,15 @@ class ReprocessTests(unittest.TestCase):
         self.assertEqual(tables["amendments"][0]["id"], amendment_id)
 
 
+class AmendmentNumberTests(unittest.TestCase):
+    def test_ui_number_overrides_extracted_first_amendment(self):
+        processor = AmendmentProcessorV2.__new__(AmendmentProcessorV2)
+        self.assertEqual(
+            processor._resolve_amendment_number({"value": "First Amendment"}, 2),
+            2,
+        )
+        self.assertEqual(processor._parse_amendment_number("Second Amendment"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

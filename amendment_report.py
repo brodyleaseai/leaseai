@@ -35,6 +35,8 @@ import config
 from amendment_clause_links import (
     apply_related_clause_updates,
     extract_structural_clauses,
+    parse_dollar_rates,
+    parse_rsf,
 )
 from lease_report import _header_footer
 from report_sources import clause_source, format_source_html
@@ -67,12 +69,88 @@ def _pdf_text(value: Any, limit: int = 1600) -> str:
 _AMOUNT = re.compile(
     r"\$\s?[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?\s?%|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\b\d+(?:\.\d+)?\b"
 )
+_MONTH_NAMES = (
+    "January|February|March|April|May|June|July|August|"
+    "September|October|November|December"
+)
+_NAMED_DATE = re.compile(rf"(?:{_MONTH_NAMES})\s+\d{{1,2}},\s+\d{{4}}", re.IGNORECASE)
+_ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+_AREA_HINT = re.compile(r"sq\.?\s*ft|square feet|\brsf\b|premises|comprise", re.IGNORECASE)
+_TOTAL_MONEY = re.compile(
+    r"(?:total(?:ling)?(?:\s+\w+){0,4}|shall then be|then be)\b[^$]{0,80}"
+    r"\$([\d,]+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_EXPANSION_RENT = re.compile(
+    r"attributable to the Expansion Space|Expansion Space is charged|"
+    r"Base Rent attributable to the Expansion",
+    re.IGNORECASE,
+)
+_ADDITIONAL_RSF = re.compile(
+    r"additional (\d{1,3}(?:,\d{3})+|\d+)\s+"
+    r"(?:rentable square feet|rsf|sq\.?\s*ft|square feet)",
+    re.IGNORECASE,
+)
+_ADDITIONAL_MONEY = re.compile(
+    r"additional\b.{0,40}$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_dates(text: str) -> str:
+    stripped = _NAMED_DATE.sub(" ", text or "")
+    return _ISO_DATE.sub(" ", stripped)
+
+
+def _looks_like_area(text: str) -> bool:
+    return bool(_AREA_HINT.search(text or "")) or bool(parse_rsf(text or ""))
+
+
+def _money_value(token: str) -> Optional[float]:
+    try:
+        return float(re.sub(r"[^\d.]", "", token or ""))
+    except ValueError:
+        return None
 
 
 def summarize_clause_change(original: str, governing: str) -> str:
     """Pull the short before → after a reader can scan (5% → 3.5%)."""
-    original_nums = _AMOUNT.findall(original or "")
-    governing_nums = _AMOUNT.findall(governing or "")
+    original = original or ""
+    governing = governing or ""
+
+    old_rsf = parse_rsf(original)
+    new_rsf = parse_rsf(governing)
+    if old_rsf and new_rsf and old_rsf != new_rsf and _looks_like_area(original):
+        return f"{old_rsf:,} → {new_rsf:,}"
+
+    total_match = _TOTAL_MONEY.search(governing)
+    old_money = re.search(r"\$\s?([\d,]+(?:\.\d+)?)", original)
+    if total_match and old_money:
+        old_val = _money_value(old_money.group(1))
+        new_val = _money_value(total_match.group(1))
+        if old_val is not None and new_val is not None and old_val != new_val:
+            return f"${old_money.group(1)} → ${total_match.group(1)}"
+
+    if _EXPANSION_RENT.search(governing):
+        rates = parse_dollar_rates(governing)
+        extra = _ADDITIONAL_RSF.search(governing) or _ADDITIONAL_RSF.search(original)
+        if rates:
+            extra_bit = ""
+            if extra:
+                extra_bit = f"{int(extra.group(1).replace(',', '')):,} RSF at "
+            return (
+                f"Expansion Space {extra_bit}${rates[0]:.2f}/RSF/year; "
+                "original Premises continue at existing rates"
+            )
+
+    original_nums = _AMOUNT.findall(_strip_dates(original))
+    governing_nums = []
+    for match in _AMOUNT.finditer(_strip_dates(governing)):
+        token = match.group(0)
+        prefix = _strip_dates(governing)[max(0, match.start() - 40) : match.start()]
+        if "$" in token and _ADDITIONAL_MONEY.search(prefix):
+            continue
+        governing_nums.append(token)
 
     def _key(token: str) -> str:
         return re.sub(r"[\s,$]", "", token)
@@ -89,13 +167,22 @@ def summarize_clause_change(original: str, governing: str) -> str:
         used = set()
         for old in old_nums:
             old_key = _key(old)
+            old_kind = _kind(old)
+            old_val = _money_value(old) if old_kind == "money" else None
             for index, new in enumerate(new_nums):
-                if index in used or _kind(old) != _kind(new):
+                if index in used or old_kind != _kind(new):
                     continue
-                if _key(new) != old_key:
-                    found.append(f"{old.strip()} → {new.strip()}")
-                    used.add(index)
-                    break
+                if _key(new) == old_key:
+                    continue
+                if old_kind == "money":
+                    new_val = _money_value(new)
+                    if old_val and new_val:
+                        ratio = max(old_val, new_val) / min(old_val, new_val)
+                        if ratio > 20:
+                            continue
+                found.append(f"{old.strip()} → {new.strip()}")
+                used.add(index)
+                break
             if len(found) >= 3:
                 break
         return found
@@ -130,14 +217,30 @@ def _amendment_lookup(amendments: Iterable[dict]) -> Dict[str, dict]:
     return lookup
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _row_when_iso(row: Optional[dict]) -> str:
+    if not row:
+        return ""
+    for key in ("effective_from", "effective_date", "amendment_date", "created_at"):
+        text = _clean(row.get(key))
+        if text:
+            return text[:10]
+    return ""
+
+
+def _version_rank(row: dict) -> tuple:
+    """Latest row: higher version wins, then later date. Ignore stale is_current flags."""
+    return (_as_int(row.get("version_number")), _row_when_iso(row))
+
+
 def _sort_versions(rows: Iterable[dict]) -> List[dict]:
-    return sorted(
-        rows,
-        key=lambda row: (
-            row.get("version_number") is None,
-            row.get("version_number") if isinstance(row.get("version_number"), int) else 0,
-        ),
-    )
+    return sorted(rows, key=_version_rank)
 
 
 def abstract_filename(model: Dict[str, Any]) -> str:
@@ -163,7 +266,13 @@ _CHANGE_TYPES = {
 def _clause_change_lookup(amendment_clauses: Optional[Iterable[dict]]) -> Dict[str, dict]:
     lookup: Dict[str, dict] = {}
     rows = [row for row in (amendment_clauses or []) if row.get("clause_type")]
-    rows.sort(key=lambda row: str(row.get("effective_date") or row.get("created_at") or ""))
+    rows.sort(
+        key=lambda row: (
+            _row_when_iso(row) or "9999-12-31",
+            _as_int(row.get("amendment_number")),
+            _as_int(row.get("version_number")),
+        )
+    )
     for row in rows:
         lookup[row["clause_type"]] = row
     return lookup
@@ -262,11 +371,11 @@ def build_amendment_resolution_model(
             (
                 row
                 for row in versions
-                if row.get("source_document_type") == "BASE_LEASE" or row.get("version_number") == 0
+                if row.get("source_document_type") == "BASE_LEASE" or _as_int(row.get("version_number")) == 0
             ),
             versions[0],
         )
-        current = next((row for row in versions if row.get("is_current")), versions[-1])
+        current = versions[-1]
         original_value, governing_value = _resolve_clause_values(
             _clean(original.get("clause_value")),
             _clean(current.get("clause_value")),

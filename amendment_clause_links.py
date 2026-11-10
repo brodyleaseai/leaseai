@@ -522,10 +522,23 @@ def apply_related_clause_updates(clauses: Iterable[dict]) -> List[dict]:
 
     latest_rsf, rsf_parent = _latest_rsf_parent(updated)
     base_rent = by_type.get("Base Rent") or {}
+    expansion_only = bool(
+        re.search(
+            r"attributable to the Expansion Space|Expansion Space is charged|"
+            r"Base Rent attributable to the Expansion",
+            base_rent.get("governing_value") or "",
+            re.IGNORECASE,
+        )
+    )
     base_hints = parse_dollar_rates(
         " ".join(_context_texts([base_rent] if base_rent else []))
     )
-    if latest_rsf and rsf_parent and (base_rent.get("changed") or base_hints):
+    if (
+        latest_rsf
+        and rsf_parent
+        and (base_rent.get("changed") or base_hints)
+        and not expansion_only
+    ):
         context = _context_texts(updated)
         schedule = derive_rent_schedule(
             rsf_parent.get("governing_value") or "",

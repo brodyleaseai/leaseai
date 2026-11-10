@@ -16,11 +16,16 @@ from amendment_graph_helpers import (
     lease_option_label,
     sync_prepared_for,
 )
-from asc842_amendment import enrich_lease_client
+from asc842_amendment import enrich_lease_client, load_amendment_bundle
 from amendment_report import (
     abstract_filename,
     build_amendment_resolution_model,
     generate_amendment_resolution_pdf,
+)
+from current_lease_position import (
+    build_position_from_graph,
+    generate_current_lease_position_pdf,
+    position_filename,
 )
 from report_sources import clause_source, format_source_line
 
@@ -136,17 +141,24 @@ def process_amendment_upload(uploaded_file, lease_id: str) -> None:
             from amendment_processor_v2 import AmendmentProcessorV2
 
             processor = AmendmentProcessorV2()
+            number_key = f"tab_amendment_number_{lease_id}"
+            ui_number = st.session_state.get(number_key)
             amendment_id, extracted_fields = processor.process_amendment(
                 pdf_path=tmp_path,
                 lease_id=lease_id,
                 supabase_client=sb,
                 filename=uploaded_file.name,
+                amendment_number=ui_number,
             )
             st.success("✅ Amendment processed successfully!")
             st.success(f"Amendment ID: {amendment_id}")
             st.caption("If this amendment number was already on the lease, the previous extract was replaced.")
             st.markdown("### 📊 Extraction Results")
             st.json(extracted_fields)
+            try:
+                st.session_state[f"{lease_id}_next_amendment_number"] = int(ui_number or 1) + 1
+            except (TypeError, ValueError):
+                st.session_state[f"{lease_id}_next_amendment_number"] = 2
             st.info("💡 Go to the **Amendment Chain** tab to see the updated amendment chain!")
         except Exception as e:
             st.error(f"❌ Error processing amendment: {str(e)}")
@@ -154,6 +166,40 @@ def process_amendment_upload(uploaded_file, lease_id: str) -> None:
             st.code(traceback.format_exc())
         finally:
             os.unlink(tmp_path)
+
+
+def fetch_graph_report_inputs(lease_id: str):
+    """Load clause history, amendment chain, and recorded clause changes."""
+    bundle = load_amendment_bundle(sb, lease_id)
+    errors = []
+    if bundle.get("load_error"):
+        errors.append(f"Could not load amendment chain for the report: {bundle['load_error']}")
+    amendments = bundle.get("amendments") or []
+    by_id = {
+        str(row.get("amendment_id") or row.get("id")): row
+        for row in amendments
+        if row.get("amendment_id") or row.get("id")
+    }
+    clause_changes = []
+    for row in bundle.get("amendment_clauses") or []:
+        stamped = dict(row)
+        parent = by_id.get(str(row.get("amendment_id") or ""))
+        if parent and parent.get("amendment_number") is not None:
+            stamped["amendment_number"] = parent["amendment_number"]
+        clause_changes.append(stamped)
+    return bundle.get("history") or [], amendments, clause_changes, errors
+
+
+def _next_amendment_number(lease_id: str) -> int:
+    try:
+        bundle = load_amendment_bundle(sb, lease_id)
+        numbers = [
+            int(row.get("amendment_number") or 0)
+            for row in bundle.get("amendments") or []
+        ]
+        return max(numbers) + 1 if numbers else 1
+    except Exception:
+        return 1
 
 
 def render_amendment_upload(lease_id: str, key_prefix: str) -> None:
@@ -164,14 +210,20 @@ def render_amendment_upload(lease_id: str, key_prefix: str) -> None:
         help="Upload the amendment or addendum document (PDF format)",
         key=f"{key_prefix}_amendment_pdf_{lease_id}",
     )
+    number_key = f"{key_prefix}_amendment_number_{lease_id}"
+    next_number = _next_amendment_number(lease_id)
+    pending = st.session_state.pop(f"{lease_id}_next_amendment_number", None)
+    if pending:
+        st.session_state[number_key] = pending
+    elif number_key not in st.session_state:
+        st.session_state[number_key] = next_number
     col1, col2 = st.columns(2)
     with col1:
         st.number_input(
             "Amendment Number",
             min_value=1,
-            value=1,
-            help="1st Amendment, 2nd Amendment, etc.",
-            key=f"{key_prefix}_amendment_number_{lease_id}",
+            help="1st Amendment, 2nd Amendment, etc. Defaults to the next number on this lease.",
+            key=number_key,
         )
     with col2:
         st.date_input(
@@ -233,11 +285,12 @@ with st.sidebar:
     )
 
 # Main content
-tab1, tab2, tab3, tab5, tab4 = st.tabs([
+tab1, tab2, tab3, tab5, tab6, tab4 = st.tabs([
     "📊 Amendment Chain",
     "🔍 Clause History",
     "⚖️ Query Engine",
     "📄 Resolution Abstract",
+    "📍 Current Position",
     "📤 Upload Amendment",
 ])
 
@@ -533,59 +586,11 @@ with tab5:
         key="abstract_prepared_for",
     )
 
-    try:
-        report_history = (
-            sb.table("lease_clause_history")
-            .select("*")
-            .eq("lease_id", selected_lease_id)
-            .execute()
-            .data
-            or []
-        )
-    except Exception as e:
-        report_history = []
-        st.error(f"Could not load clause history for the report: {e}")
-
-    try:
-        report_amendments = (
-            sb.rpc("get_amendment_chain", {"p_lease_id": selected_lease_id}).execute().data or []
-        )
-    except Exception as e:
-        report_amendments = []
-        st.error(f"Could not load amendment chain for the report: {e}")
-
-    report_clause_changes = []
-    for amendment in report_amendments:
-        amendment_id = amendment.get("amendment_id")
-        if not amendment_id:
-            continue
-        try:
-            report_clause_changes.extend(
-                sb.table("amendment_clauses")
-                .select("*")
-                .eq("amendment_id", amendment_id)
-                .execute()
-                .data
-                or []
-            )
-        except Exception as e:
-            st.error(f"Could not load recorded amendment clauses: {e}")
-        try:
-            full = (
-                sb.table("amendments")
-                .select("extracted_data, effective_date")
-                .eq("id", amendment_id)
-                .limit(1)
-                .execute()
-                .data
-                or []
-            )
-            if full:
-                amendment["extracted_data"] = full[0].get("extracted_data")
-                if full[0].get("effective_date") and not amendment.get("effective_date"):
-                    amendment["effective_date"] = full[0]["effective_date"]
-        except Exception:
-            pass
+    report_history, report_amendments, report_clause_changes, report_errors = fetch_graph_report_inputs(
+        selected_lease_id
+    )
+    for message in report_errors:
+        st.error(message)
 
     report_model = build_amendment_resolution_model(
         selected_lease,
@@ -695,6 +700,155 @@ with tab5:
                 )
     except Exception as e:
         st.error(f"Could not build the amendment report PDF: {e}")
+
+# ============================================================================
+# TAB 6: Current Lease Position
+# ============================================================================
+with tab6:
+    st.markdown("### 📍 Current Lease Position")
+    st.markdown(
+        "The Amendment Resolution Abstract says **which language governs**. "
+        "This report says **what those terms mean in money and dates**. "
+        "Calculated totals are labeled Calculated — they are not amounts the "
+        "parties wrote into the amendment unless Status is Extracted or Amended."
+    )
+    st.markdown("---")
+
+    sync_prepared_for(
+        st.session_state,
+        lease_id=selected_lease_id,
+        client_name=lease_client_name(selected_lease),
+        value_key="position_prepared_for",
+        lease_key="position_prepared_lease_id",
+    )
+    position_prepared_for = st.text_input(
+        "Prepared for (client / customer)",
+        help="Always the client on the selected lease. Switching leases replaces this name.",
+        key="position_prepared_for",
+    )
+
+    history, amendments, clause_changes, position_errors = fetch_graph_report_inputs(
+        selected_lease_id
+    )
+    for message in position_errors:
+        st.error(message)
+
+    position_model = build_position_from_graph(
+        selected_lease,
+        amendments,
+        history,
+        as_of=query_date.isoformat(),
+        prepared_for=position_prepared_for,
+        amendment_clauses=clause_changes,
+    )
+    position_value = position_model["value"]
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Amendments applied", position_value["amendments_resolved"])
+    p2.metric("Fields reported", position_value["fields_reported"])
+    p3.metric("Calculated fields", position_value["calculated_fields"])
+    p4.metric("Review required", position_value["review_required"])
+    st.caption(
+        f"Position as of {position_value['as_of']} · Prepared for {position_value['prepared_for']}"
+    )
+    if amendments:
+        labels = []
+        for amendment in amendments:
+            number = amendment.get("amendment_number") or "?"
+            when = amendment.get("effective_date") or amendment.get("amendment_date") or ""
+            labels.append(f"No. {number}" + (f" ({when})" if when else ""))
+        st.caption("Chain applied: " + ", ".join(labels))
+    else:
+        st.caption("No amendments are on file yet. The original lease terms govern.")
+
+    if position_model["review_flags"]:
+        st.warning("Review required before relying on a calculated total:")
+        for flag in position_model["review_flags"]:
+            st.write(f"- {flag}")
+
+    if position_model["rows"]:
+        st.dataframe(
+            [
+                {
+                    "Field": row["field"],
+                    "Current": row["current_value"],
+                    "Previous": row["previous_value"],
+                    "Effective": row["effective_date"],
+                    "Status": row["status"],
+                    "Calculation": row["calculation"],
+                }
+                for row in position_model["rows"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        with st.expander("Source citations", expanded=False):
+            for row in position_model["rows"]:
+                st.markdown(f"**{row['field']}** — {row['status']}")
+                st.caption(row["source"])
+    else:
+        st.info("No governing terms are on file yet. Process the lease and any amendments first.")
+
+    try:
+        position_pdf = generate_current_lease_position_pdf(position_model)
+        st.download_button(
+            "⬇️ Download Current Lease Position (PDF)",
+            data=position_pdf,
+            file_name=position_filename(position_model),
+            mime="application/pdf",
+            key=f"position_report_pdf_{selected_lease_id}",
+        )
+
+        default_email = ""
+        client_id = selected_lease.get("client_id")
+        if client_id:
+            try:
+                client_row = (
+                    sb.table("clients")
+                    .select("email")
+                    .eq("id", client_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if client_row:
+                    default_email = client_row[0].get("email") or ""
+            except Exception:
+                default_email = ""
+
+        st.markdown("#### Email this position report to the client")
+        position_email = st.text_input(
+            "Client email",
+            value=default_email,
+            placeholder="client@company.com",
+            key=f"position_email_{selected_lease_id}",
+        )
+        if st.button(
+            "📧 Email Current Lease Position",
+            key=f"position_email_send_{selected_lease_id}",
+        ):
+            from email_delivery import send_current_position_email
+
+            sent = send_current_position_email(
+                recipient_email=position_email.strip(),
+                recipient_name=position_prepared_for or position_model["tenant_name"],
+                property_address=position_model["property_address"],
+                tenant_name=position_model["tenant_name"],
+                pdf_bytes=position_pdf,
+                filename=position_filename(position_model),
+                as_of=position_model["as_of"],
+                calculated_fields=position_value["calculated_fields"],
+                review_required=position_value["review_required"],
+            )
+            if sent:
+                st.success(f"Current Lease Position emailed to {position_email.strip()}")
+            else:
+                st.error(
+                    "Could not send the email. Check the address and that SendGrid is configured."
+                )
+    except Exception as e:
+        st.error(f"Could not build the Current Lease Position PDF: {e}")
 
 # Footer
 st.markdown("---")
