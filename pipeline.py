@@ -149,6 +149,12 @@ def write_fields(lease_id, fields):
 
 def set_status(lease_id, status):
     db.table("leases").update({"status": status}).eq("id", lease_id).execute()
+    try:
+        from lease_term_facts import try_sync_lease_term_facts
+
+        try_sync_lease_term_facts(db, lease_id)
+    except Exception:
+        pass
 
 
 def run(pdf_path, client_id):

@@ -266,6 +266,12 @@ def process_uploaded_lease(
                     "extracted_data": extracted_fields,
                     "page_count": page_count
                 }).eq("id", lease_id).execute()
+                try:
+                    from lease_term_facts import try_sync_lease_term_facts
+
+                    try_sync_lease_term_facts(supabase, lease_id)
+                except Exception:
+                    pass
                 
                 progress_bar.progress(100)
                 status_text.text("✅ Complete!")

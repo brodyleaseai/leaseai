@@ -105,6 +105,11 @@ LeaseAI maintains daily backups of Customer Data with 30-day retention. Backups 
 **4.5 Data Export**  
 Customer may export its data at any time in CSV, Excel, or PDF format.
 
+**4.6 Aggregated Anonymized Statistics (optional opt-in)**  
+Customer retains ownership of Customer Data. If Customer enables the corpus opt-in on its account, Customer grants LeaseAI a non-exclusive license to derive **Aggregated Anonymized Statistics** from Customer Data for improving the Services and producing industry benchmarks.
+
+Aggregated Anonymized Statistics exclude party names, street addresses, document images, source excerpts, and any identifier that can reasonably identify Customer or a data subject. Customer may withdraw opt-in at any time; withdrawal stops new inclusion and does not require LeaseAI to unwind already-published anonymous aggregates. This license is **not** a license to sell or share raw leases or identifiable abstracts.
+
 ---
 
 ## 5. INTELLECTUAL PROPERTY

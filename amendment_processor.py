@@ -125,6 +125,13 @@ class AmendmentProcessor:
         print(f"✓ Amendment status updated")
         
         print(f"✓ Amendment processing complete!")
+
+        try:
+            from lease_term_facts import try_sync_lease_term_facts
+
+            try_sync_lease_term_facts(supabase_client, lease_id)
+        except Exception:
+            pass
         
         return amendment_id, extracted_fields
     
