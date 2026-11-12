@@ -22,6 +22,7 @@ Save-RepoFile "lease_header.py"
 Save-RepoFile "lease_report.py"
 Save-RepoFile "report_sources.py"
 Save-RepoFile "pages/9_%F0%9F%93%A6_Bulk_Upload.py"
+Save-RepoFile "pages/2_%F0%9F%93%8B_Lease_Review.py"
 Save-RepoFile "client_portal_enhanced.py"
 
 Write-Host "Restart Streamlit, then bulk upload will process every selected PDF one at a time."

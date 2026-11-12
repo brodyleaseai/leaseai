@@ -16,7 +16,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
-from report_sources import field_source, format_source_html, source_exhibit_rows
+from report_sources import (
+    enrich_report_fields,
+    field_source,
+    format_source_html,
+    source_exhibit_rows,
+)
 
 
 def _make_colored_box(box_color: str):
@@ -117,6 +122,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     Returns:
         PDF content as bytes
     """
+    extracted_fields = enrich_report_fields(lease_data, extracted_fields)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,

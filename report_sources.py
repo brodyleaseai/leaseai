@@ -181,6 +181,38 @@ def clause_source(clause: Optional[dict], side: str = "governing") -> Dict[str, 
     )
 
 
+def enrich_report_fields(
+    lease_data: Optional[dict],
+    extracted_fields: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Restore excerpts the review page dropped (value/confidence only)."""
+    stored = (lease_data or {}).get("extracted_data") or {}
+    incoming = extracted_fields or stored or {}
+    merged: Dict[str, Any] = {}
+    for name, field in incoming.items():
+        if not isinstance(field, dict):
+            merged[name] = field
+            continue
+        row = dict(field)
+        if field_source(row).get("excerpt"):
+            merged[name] = row
+            continue
+        backup = stored.get(name) if isinstance(stored.get(name), dict) else {}
+        excerpt = _first(
+            backup.get("source_snippet"),
+            backup.get("source_text"),
+            backup.get("source_quote"),
+            backup.get("excerpt"),
+        )
+        if excerpt:
+            row["source_text"] = excerpt
+            row["source_snippet"] = excerpt
+            if backup.get("source_page") and not row.get("source_page"):
+                row["source_page"] = backup.get("source_page")
+        merged[name] = row
+    return merged
+
+
 def fields_from_review_rows(
     rows: Optional[Iterable[dict]],
     default_document: str = "Original lease",

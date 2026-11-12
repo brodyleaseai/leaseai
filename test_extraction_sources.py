@@ -128,5 +128,53 @@ class HeaderTests(unittest.TestCase):
         )
 
 
+class ReportPayloadTests(unittest.TestCase):
+    def test_review_rows_keep_source_text(self):
+        from report_sources import fields_from_review_rows
+
+        mapped = fields_from_review_rows(
+            [
+                {
+                    "field_name": "Tenant Legal Name",
+                    "raw_value": "Cobalt Ridge Consulting Inc.",
+                    "confidence": "HIGH",
+                    "source_text": "Page 3. The Tenant is Cobalt Ridge Consulting Inc.",
+                }
+            ]
+        )
+        self.assertIn("Cobalt Ridge", mapped["Tenant Legal Name"]["source_text"])
+
+    def test_pdf_recovers_excerpt_dropped_by_review_page(self):
+        from lease_report import generate_lease_abstract_pdf
+        import io
+        import PyPDF2
+
+        lease = {
+            "tenant_name": "Cobalt Ridge Consulting Inc.",
+            "property_address": "Suite 410, 880 West Pender Street, Vancouver, BC V6C 2T8",
+            "extracted_data": {
+                "Tenant Legal Name": {
+                    "value": "Cobalt Ridge Consulting Inc.",
+                    "confidence": "HIGH",
+                    "source_text": "Page 3. The Tenant is Cobalt Ridge Consulting Inc.",
+                }
+            },
+        }
+        # Review page previously sent only value + confidence
+        stripped = {
+            "Tenant Legal Name": {
+                "value": "Cobalt Ridge Consulting Inc.",
+                "confidence": "HIGH",
+            }
+        }
+        pdf = generate_lease_abstract_pdf(lease, stripped)
+        text = "\n".join(
+            page.extract_text() or "" for page in PyPDF2.PdfReader(io.BytesIO(pdf)).pages
+        )
+        self.assertNotIn("source excerpt was not stored", text.lower())
+        self.assertIn("Cobalt Ridge Consulting Inc.", text)
+        self.assertIn("Page 3", text)
+
+
 if __name__ == "__main__":
     unittest.main()
