@@ -19,5 +19,7 @@ Save-RepoFile "bulk_upload.py"
 Save-RepoFile "extraction_timeout.py"
 Save-RepoFile "extraction_pipeline.py"
 Save-RepoFile "pages/9_%F0%9F%93%A6_Bulk_Upload.py"
+Save-RepoFile "client_portal_enhanced.py"
 
 Write-Host "Restart Streamlit, then bulk upload will process every selected PDF one at a time."
+Write-Host "Re-process a lease to restore verbatim source excerpts on the abstract report."

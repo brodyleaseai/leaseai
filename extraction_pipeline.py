@@ -15,6 +15,58 @@ import config
 
 # Serialize GPT calls so bulk upload cannot 429 two of three leases.
 _GPT_LOCK = threading.Lock()
+_EMPTY_SOURCE = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN", "—", "-"}
+_PAGE_IN_TEXT = re.compile(r"(?:---\s*)?(?:page|p\.?)\s*(\d{1,4})\b", re.IGNORECASE)
+
+
+def source_excerpt_from_field(field_data) -> str:
+    """Pull a verbatim excerpt from any GPT/DB source key the model used."""
+    if not isinstance(field_data, dict):
+        return ""
+    for key in (
+        "source_snippet",
+        "source_text",
+        "source_quote",
+        "excerpt",
+        "source",
+    ):
+        raw = field_data.get(key)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if text and text.upper() not in _EMPTY_SOURCE:
+            return text
+    return ""
+
+
+def with_page_prefix(excerpt: str, page=None) -> str:
+    """Keep the page number in source_text when the table has no page column."""
+    text = (excerpt or "").strip()
+    if page not in (None, ""):
+        digits = re.search(r"\d+", str(page))
+        if digits and not _PAGE_IN_TEXT.search(text):
+            prefix = f"Page {digits.group(0)}."
+            return f"{prefix} {text}".strip()
+    return text
+
+
+def normalize_extracted_fields(extracted_fields: Optional[Dict]) -> Dict:
+    """Copy excerpts onto source_snippet/source_text so client reports can cite them."""
+    normalized: Dict = {}
+    for name, data in (extracted_fields or {}).items():
+        if not isinstance(data, dict):
+            data = {"value": str(data), "confidence": "LOW", "source_snippet": ""}
+        else:
+            data = dict(data)
+        excerpt = with_page_prefix(
+            source_excerpt_from_field(data),
+            data.get("source_page") or data.get("page"),
+        )
+        if excerpt:
+            data["source_snippet"] = excerpt
+            data["source_text"] = excerpt
+        normalized[name] = data
+    return normalized
 
 
 class LeaseExtractionPipeline:
@@ -163,7 +215,8 @@ class LeaseExtractionPipeline:
                 
                 for page_num in range(page_count):
                     page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n\n"
+                    text += f"\n\n--- Page {page_num + 1} ---\n\n"
+                    text += page.extract_text() or ""
             
             text = text.strip()
             
@@ -387,6 +440,9 @@ IMPORTANT INSTRUCTIONS:
 - Extract COMPLETE clauses - do not truncate mid-sentence
 - Be thorough but precise - don't invent information
 - For long clauses, capture the FULL text in the value field
+- For every field that is found, copy a verbatim source_snippet from the lease. Do not leave source_snippet empty when confidence is HIGH or MEDIUM.
+- If a "--- Page N ---" marker is near the excerpt, set source_page to N.
+- If the field is genuinely not in the lease, set value to NOT FOUND, confidence LOW, and source_snippet to an empty string.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
@@ -403,7 +459,8 @@ Return your response as a JSON object with this exact structure:
   "field_name": {{
     "value": "extracted value or NOT FOUND",
     "confidence": "HIGH|MEDIUM|LOW",
-    "source_snippet": "relevant text from lease (first 200 chars)",
+    "source_snippet": "verbatim excerpt from the lease, including the nearby heading if present (first 300 chars)",
+    "source_page": "page number if visible in the document text, otherwise omit",
     "notes": "any clarifications or reasoning"
   }}
 }}
@@ -629,7 +686,9 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Lease created with ID: {lease_id}")
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
-        extracted_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+        extracted_fields = normalize_extracted_fields(
+            self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+        )
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
         print(f"[5/6] Saving extracted fields to database...")
@@ -639,7 +698,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             if isinstance(field_data, dict):
                 value = field_data.get("value", "NOT FOUND")
                 confidence_str = field_data.get("confidence", "LOW")
-                source_snippet = field_data.get("source_snippet", "")
+                source_snippet = field_data.get("source_text") or field_data.get("source_snippet") or ""
                 notes = field_data.get("notes", "")
             else:
                 value = str(field_data)
@@ -655,7 +714,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 "raw_value": value,
                 "confidence": confidence_str,
                 "confidence_score": confidence_score,
-                "source_text": source_snippet[:500] if source_snippet else "",
+                "source_text": source_snippet[:1000] if source_snippet else "",
                 "notes": notes,
                 "reviewed": False,
             })
