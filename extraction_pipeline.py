@@ -669,6 +669,18 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             print(f"⚠ Failed to seed clause history: {e}")
             import traceback
             traceback.print_exc()
+
+        print(f"[9/9] Updating de-identified terms warehouse...")
+        try:
+            from lease_term_facts import try_sync_lease_term_facts
+
+            fact = try_sync_lease_term_facts(supabase_client, lease_id)
+            if fact:
+                print("✓ Term facts stored (no party names or street address)")
+            else:
+                print("⚠ Term facts not stored (run database_schema_lease_term_facts.sql if this is the first time)")
+        except Exception as e:
+            print(f"⚠ Failed to store term facts: {e}")
         
         print(f"✓ Processing complete!")
         

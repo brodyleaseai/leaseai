@@ -44,6 +44,7 @@ LeaseAI will Process Personal Data only to:
 - Generate reports and analytics
 - Provide customer support
 - Ensure system security and availability
+- If Customer has opted in, derive aggregated anonymized statistics that do not include Personal Data (no names, street addresses, or document images)
 
 **2.3 Types of Personal Data Processed**
 - Tenant names and contact information

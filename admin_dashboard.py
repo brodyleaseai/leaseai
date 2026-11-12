@@ -234,6 +234,9 @@ def update_lease_status(lease_id: int, new_status: str, supabase):
     """Update lease status in database."""
     try:
         supabase.table("leases").update({"status": new_status}).eq("id", lease_id).execute()
+        from lease_term_facts import try_sync_lease_term_facts
+
+        try_sync_lease_term_facts(supabase, lease_id)
     except Exception as e:
         st.error(f"Error updating status: {str(e)}")
 
@@ -301,6 +304,20 @@ def render_analytics_page(supabase):
             st.metric("Flagged", status_counts.get("FLAGGED", 0))
         
         st.markdown("---")
+        st.subheader("Terms warehouse")
+        try:
+            from lease_term_facts import export_anonymized_facts, summarize_facts
+
+            stored = summarize_facts(
+                supabase.table("lease_term_facts").select("*").execute().data or []
+            )
+            exported = summarize_facts(export_anonymized_facts(supabase))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Facts stored", stored["leases"])
+            c2.metric("Opted-in export rows", exported["leases"])
+            c3.metric("Avg $/RSF/year", stored["avg_rent_per_rsf_year"] or "—")
+        except Exception:
+            st.info("Run database_schema_lease_term_facts.sql in Supabase to collect term facts.")
         
         # Status breakdown
         st.subheader("Status Breakdown")

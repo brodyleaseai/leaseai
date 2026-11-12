@@ -89,6 +89,26 @@ with col4:
     st.metric("Flagged", flagged, delta=None, delta_color="inverse")
 
 st.markdown("---")
+st.subheader("📈 Terms warehouse")
+st.caption(
+    "De-identified facts copied from processed leases. Party names and street "
+    "addresses are not stored. Partner export includes only opted-in customers."
+)
+try:
+    from lease_term_facts import export_anonymized_facts, summarize_facts
+
+    warehouse = sb.table("lease_term_facts").select("id, rsf, rent_per_rsf_year, escalation_pct").execute().data or []
+    internal = summarize_facts(warehouse)
+    exported = summarize_facts(export_anonymized_facts(sb))
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("Facts stored", internal["leases"])
+    w2.metric("Opted-in export rows", exported["leases"])
+    w3.metric("Avg $/RSF/year (internal)", internal["avg_rent_per_rsf_year"] or "—")
+    w4.metric("Avg RSF (internal)", internal["avg_rsf"] or "—")
+except Exception:
+    st.info("Run `database_schema_lease_term_facts.sql` in Supabase to start collecting term facts.")
+
+st.markdown("---")
 
 # Recent Activity
 st.subheader("📋 Recent Leases")

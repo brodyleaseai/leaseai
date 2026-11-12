@@ -132,6 +132,55 @@ with tab2:
         st.text_input("User ID", value=str(user_id), disabled=True)
     
     st.markdown("---")
+    st.markdown("### Industry terms corpus")
+    st.caption(
+        "Optional. If you opt in, LeaseAI may include **de-identified** numbers "
+        "from your processed leases (market, RSF, $/RSF, escalations, term) in "
+        "aggregated industry statistics. Party names, street addresses, and PDFs "
+        "are never included. You can turn this off at any time."
+    )
+    try:
+        client_row = (
+            sb.table("clients")
+            .select("id, allow_anonymized_corpus")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not client_row and user_email:
+            client_row = (
+                sb.table("clients")
+                .select("id, allow_anonymized_corpus")
+                .eq("email", user_email)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        if client_row:
+            opted = bool(client_row[0].get("allow_anonymized_corpus"))
+            new_value = st.checkbox(
+                "Allow anonymized term facts in aggregated industry statistics",
+                value=opted,
+                key="allow_anonymized_corpus",
+            )
+            if new_value != opted:
+                sb.table("clients").update({"allow_anonymized_corpus": new_value}).eq(
+                    "id", client_row[0]["id"]
+                ).execute()
+                st.success("Corpus preference saved.")
+                st.rerun()
+        else:
+            st.info("Corpus opt-in is stored on the client account. Contact admin if you do not see a checkbox.")
+    except Exception as exc:
+        st.warning(
+            "Could not load corpus preference. Run `database_schema_lease_term_facts.sql` in Supabase. "
+            f"({exc})"
+        )
+
+    st.markdown("---")
     st.info("ℹ️ Profile editing coming soon. Contact admin to update your profile.")
 
 # ============================================================================

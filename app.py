@@ -124,6 +124,12 @@ def update_lease_status(lease_id, status):
         "status": status,
         "reviewed_at": datetime.utcnow().isoformat(),
     }).eq("id", lease_id).execute()
+    try:
+        from lease_term_facts import try_sync_lease_term_facts
+
+        try_sync_lease_term_facts(sb, lease_id)
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
