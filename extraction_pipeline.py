@@ -5,11 +5,16 @@ Complete PDF → AI Extraction → Database workflow
 import os
 import re
 import json
+import time
+import threading
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+
+# Serialize GPT calls so bulk upload cannot 429 two of three leases.
+_GPT_LOCK = threading.Lock()
 
 
 class LeaseExtractionPipeline:
@@ -407,7 +412,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
 """
         
         try:
-            response = self.client.chat.completions.create(
+            response = self._chat_completion_with_retry(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are an expert lease abstraction specialist with 20 years of experience in commercial real estate. Extract data accurately and provide confidence scores. Extract COMPLETE clauses without truncation."},
@@ -438,6 +443,37 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             raise Exception(f"Failed to parse GPT-4 response as JSON: {str(e)}")
         except Exception as e:
             raise Exception(f"GPT-4 extraction failed: {str(e)}")
+
+    def _chat_completion_with_retry(self, **kwargs):
+        """Retry transient OpenAI errors so a 429 does not drop the rest of a batch."""
+        last_error = None
+        with _GPT_LOCK:
+            for attempt in range(4):
+                try:
+                    return self.client.chat.completions.create(**kwargs)
+                except Exception as exc:
+                    last_error = exc
+                    text = str(exc).lower()
+                    retryable = any(
+                        token in text
+                        for token in (
+                            "rate limit",
+                            "429",
+                            "timeout",
+                            "temporar",
+                            "overloaded",
+                            "503",
+                            "502",
+                            "connection",
+                            "try again",
+                        )
+                    )
+                    if not retryable or attempt == 3:
+                        raise
+                    wait = min(2 ** attempt, 8)
+                    print(f"⚠ OpenAI error (attempt {attempt + 1}/4), retrying in {wait}s: {exc}")
+                    time.sleep(wait)
+        raise last_error
     
     def calculate_confidence_score(self, confidence_str: str) -> float:
         """
@@ -597,6 +633,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
         print(f"[5/6] Saving extracted fields to database...")
+        field_records = []
         field_number = 1
         for field_name, field_data in extracted_fields.items():
             if isinstance(field_data, dict):
@@ -611,8 +648,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 notes = ""
             
             confidence_score = self.calculate_confidence_score(confidence_str)
-            
-            field_record = {
+            field_records.append({
                 "lease_id": lease_id,
                 "field_name": field_name,
                 "field_number": field_number,
@@ -622,12 +658,18 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 "source_text": source_snippet[:500] if source_snippet else "",
                 "notes": notes,
                 "reviewed": False,
-            }
-            
-            supabase_client.table("extracted_fields").insert(field_record).execute()
+            })
             field_number += 1
+
+        if field_records:
+            try:
+                supabase_client.table("extracted_fields").insert(field_records).execute()
+            except Exception as batch_error:
+                print(f"⚠ Batch field insert failed ({batch_error}); inserting one at a time")
+                for record in field_records:
+                    supabase_client.table("extracted_fields").insert(record).execute()
         
-        print(f"✓ Saved {field_number - 1} fields")
+        print(f"✓ Saved {len(field_records)} fields")
         
         print(f"[6/7] Updating lease status to READY FOR REVIEW...")
         supabase_client.table("leases").update({
