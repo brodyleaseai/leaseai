@@ -218,13 +218,17 @@ def process_uploaded_lease(
                 status_text.text("🧠 GPT-4 analyzing lease clauses...")
                 
                 # Extract fields with GPT-4
-                from extraction_pipeline import normalize_extracted_fields
+                from extraction_pipeline import attach_missing_excerpts, normalize_extracted_fields
+                from lease_header import lease_header_updates
 
                 extracted_fields = normalize_extracted_fields(
-                    pipeline.extract_fields_with_gpt4(
+                    attach_missing_excerpts(
                         lease_text,
-                        property_address,
-                        tenant_name
+                        pipeline.extract_fields_with_gpt4(
+                            lease_text,
+                            property_address,
+                            tenant_name
+                        ),
                     )
                 )
                 
@@ -265,11 +269,13 @@ def process_uploaded_lease(
                 progress_bar.progress(90)
                 
                 # Update lease status
-                supabase.table("leases").update({
+                lease_update = {
                     "status": "READY FOR REVIEW",
                     "extracted_data": extracted_fields,
                     "page_count": page_count
-                }).eq("id", lease_id).execute()
+                }
+                lease_update.update(lease_header_updates(extracted_fields))
+                supabase.table("leases").update(lease_update).eq("id", lease_id).execute()
                 
                 progress_bar.progress(100)
                 status_text.text("✅ Complete!")

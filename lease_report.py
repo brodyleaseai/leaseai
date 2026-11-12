@@ -2,6 +2,7 @@
 PDF Report Generation for Lease Abstracts
 Generates professional, branded multi-page PDF reports with color-coded confidence indicators.
 """
+import html
 import io
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
@@ -15,6 +16,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
+from report_sources import field_source, format_source_html, source_exhibit_rows
 
 
 def _make_colored_box(box_color: str):
@@ -152,10 +154,12 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     story.append(Paragraph(f"{config.APP_NAME} Lease Abstract", title_style))
     story.append(Spacer(1, 0.25 * inch))
     
-    # Property Information Box
+    # Property Information Box — never keep bulk placeholders on page 1
+    from lease_header import display_property_address, display_tenant_name
+
     property_info = [
-        ["Property:", lease_data.get("property_address", "N/A")],
-        ["Tenant:", lease_data.get("tenant_name", "N/A")],
+        ["Property:", display_property_address(lease_data, extracted_fields)],
+        ["Tenant:", display_tenant_name(lease_data, extracted_fields)],
         ["Generated:", datetime.now().strftime("%B %d, %Y at %I:%M %p")],
     ]
     
@@ -174,7 +178,24 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     ]))
     
     story.append(prop_table)
-    story.append(Spacer(1, 0.5 * inch))
+    story.append(Spacer(1, 0.2 * inch))
+    cite_style = ParagraphStyle(
+        "SourceCiteIntro",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#37474F"),
+        alignment=TA_LEFT,
+    )
+    story.append(
+        Paragraph(
+            "Each extracted value is cited to the source document text. "
+            "The Source Exhibit at the end of this abstract is the workpaper "
+            "an auditor, lender, or buyer can attach.",
+            cite_style,
+        )
+    )
+    story.append(Spacer(1, 0.35 * inch))
     
     # Calculate confidence statistics (moved before page break)
     total_fields = len(extracted_fields)
@@ -318,6 +339,15 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         alignment=TA_LEFT
     )
     
+    source_style = ParagraphStyle(
+        "FieldSourceStyle",
+        parent=styles["Normal"],
+        fontSize=7.5,
+        leading=9.5,
+        textColor=colors.HexColor("#546E7A"),
+        alignment=TA_LEFT,
+    )
+
     for field_name, field_info in extracted_fields.items():
         if isinstance(field_info, dict):
             value = field_info.get("value", "NOT FOUND")
@@ -325,12 +355,16 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         else:
             value = str(field_info)
             confidence = None
+        source = field_source(field_info, default_document="Original lease")
         
-        display_value = str(value) if value else "NOT FOUND"
+        display_value = html.escape(str(value) if value else "NOT FOUND")
         
         # Use Paragraph for automatic text wrapping
-        field_name_para = Paragraph(field_name.replace("_", " ").title(), field_name_style)
-        value_para = Paragraph(display_value, cell_style)
+        field_name_para = Paragraph(html.escape(field_name.replace("_", " ").title()), field_name_style)
+        value_para = Paragraph(
+            f"{display_value}<br/><i>Source: {format_source_html(source)}</i>",
+            cell_style,
+        )
         
         color_hex = _confidence_color(confidence)
         conf_box = _make_colored_box(color_hex)
@@ -380,7 +414,51 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     ]))
     
     story.append(fields_table)
-    story.append(Spacer(1, 0.5 * inch))
+    story.append(Spacer(1, 0.35 * inch))
+
+    story.append(Paragraph("Source Exhibit — where each extraction came from", heading_style))
+    story.append(
+        Paragraph(
+            "Document, page (if captured), and the excerpt used for the value. "
+            "Derived figures name the parent clause.",
+            cite_style,
+        )
+    )
+    story.append(Spacer(1, 0.15 * inch))
+    exhibit_header = [
+        Paragraph("Field", header_style),
+        Paragraph("Document / page", header_style),
+        Paragraph("Source excerpt", header_style),
+    ]
+    exhibit_rows = [exhibit_header]
+    for row in source_exhibit_rows(extracted_fields, default_document="Original lease"):
+        page_bit = f", p. {row['page']}" if row["page"] not in {"", "—"} else ""
+        derived = f"<br/>Derived from {row['derived_from']}" if row["derived_from"] else ""
+        exhibit_rows.append(
+            [
+                Paragraph(str(row["field_name"]).replace("_", " "), field_name_style),
+                Paragraph(f"{row['document']}{page_bit}{derived}", source_style),
+                Paragraph(row["excerpt"], source_style),
+            ]
+        )
+    exhibit = Table(exhibit_rows, colWidths=[1.8 * inch, 1.9 * inch, 3.2 * inch], repeatRows=1)
+    exhibit.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FAFAFA")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#90CAF9")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(exhibit)
+    story.append(Spacer(1, 0.35 * inch))
     
     # Build the PDF
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)

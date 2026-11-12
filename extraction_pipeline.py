@@ -50,6 +50,76 @@ def with_page_prefix(excerpt: str, page=None) -> str:
     return text
 
 
+_PAGE_HEADER = re.compile(r"---\s*Page\s*(\d+)\s*---", re.IGNORECASE)
+
+
+def _excerpt_needles(value: str) -> List[str]:
+    compact = re.sub(r"\s+", " ", (value or "").strip())
+    needles: List[str] = []
+    if len(compact) >= 10:
+        needles.append(compact)
+        if len(compact) > 90:
+            needles.append(compact[:90].rstrip(" ,;."))
+    needles.extend(re.findall(r"\$[\d,]+(?:\.\d{2})?", compact))
+    needles.extend(re.findall(r"\d{4}-\d{2}-\d{2}", compact))
+    seen = set()
+    unique = []
+    for needle in needles:
+        key = needle.lower()
+        if key in seen or len(needle) < 5:
+            continue
+        seen.add(key)
+        unique.append(needle)
+    return unique
+
+
+def find_excerpt_in_lease(lease_text: str, value: str, radius: int = 160) -> str:
+    """If GPT omitted source_snippet, quote the surrounding lease text."""
+    text = lease_text or ""
+    if not text or not value:
+        return ""
+    lower = text.lower()
+    for needle in _excerpt_needles(value):
+        idx = lower.find(needle.lower())
+        if idx < 0 and "," in needle:
+            idx = lower.find(needle.lower().replace(",", ""))
+        if idx < 0:
+            continue
+        start = max(0, idx - radius)
+        end = min(len(text), idx + len(needle) + radius)
+        snippet = text[start:end]
+        page = None
+        for match in _PAGE_HEADER.finditer(text[: idx + 1]):
+            page = match.group(1)
+        snippet = _PAGE_HEADER.sub(" ", snippet)
+        snippet = re.sub(r"\s+", " ", snippet).strip(" -")
+        return with_page_prefix(snippet, page)
+    return ""
+
+
+def attach_missing_excerpts(lease_text: str, extracted_fields: Optional[Dict]) -> Dict:
+    """Fill empty excerpts from the PDF text so reports can cite the lease."""
+    attached: Dict = {}
+    for name, data in (extracted_fields or {}).items():
+        if not isinstance(data, dict):
+            attached[name] = data
+            continue
+        row = dict(data)
+        value = str(row.get("value") or "").strip()
+        if not value or value.upper() in _EMPTY_SOURCE:
+            attached[name] = row
+            continue
+        if source_excerpt_from_field(row):
+            attached[name] = row
+            continue
+        excerpt = find_excerpt_in_lease(lease_text, value)
+        if excerpt:
+            row["source_snippet"] = excerpt
+            row["source_text"] = excerpt
+        attached[name] = row
+    return attached
+
+
 def normalize_extracted_fields(extracted_fields: Optional[Dict]) -> Dict:
     """Copy excerpts onto source_snippet/source_text so client reports can cite them."""
     normalized: Dict = {}
@@ -687,7 +757,10 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
         extracted_fields = normalize_extracted_fields(
-            self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+            attach_missing_excerpts(
+                lease_text,
+                self.extract_fields_with_gpt4(lease_text, property_address, tenant_name),
+            )
         )
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
@@ -731,10 +804,16 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Saved {len(field_records)} fields")
         
         print(f"[6/7] Updating lease status to READY FOR REVIEW...")
-        supabase_client.table("leases").update({
+        from lease_header import lease_header_updates
+
+        lease_update = {
             "status": "READY FOR REVIEW",
             "extracted_data": extracted_fields,
-        }).eq("id", lease_id).execute()
+        }
+        lease_update.update(lease_header_updates(extracted_fields))
+        supabase_client.table("leases").update(lease_update).eq("id", lease_id).execute()
+        if lease_update.get("tenant_name"):
+            print(f"✓ Lease header tenant: {lease_update['tenant_name']}")
         print(f"✓ Lease status updated")
         
         print(f"[7/8] Extracting and adding critical dates...")

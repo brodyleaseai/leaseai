@@ -95,14 +95,11 @@ def process_one_job(
 
         supabase = supabase_factory()
         pipeline = pipeline_factory()
-        property_address = os.path.splitext(filename)[0].replace("_", " ")
         lease_id, extracted_fields = run_extract(
             pipeline,
             pdf_path=tmp_path,
             client_id=client_id,
             supabase_client=supabase,
-            property_address=property_address,
-            tenant_name="To be reviewed",
             filename=filename,
         )
         increment_usage(supabase, client_id)
