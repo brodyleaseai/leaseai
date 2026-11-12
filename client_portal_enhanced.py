@@ -218,10 +218,18 @@ def process_uploaded_lease(
                 status_text.text("🧠 GPT-4 analyzing lease clauses...")
                 
                 # Extract fields with GPT-4
-                extracted_fields = pipeline.extract_fields_with_gpt4(
-                    lease_text,
-                    property_address,
-                    tenant_name
+                from extraction_pipeline import attach_missing_excerpts, normalize_extracted_fields
+                from lease_header import lease_header_updates
+
+                extracted_fields = normalize_extracted_fields(
+                    attach_missing_excerpts(
+                        lease_text,
+                        pipeline.extract_fields_with_gpt4(
+                            lease_text,
+                            property_address,
+                            tenant_name
+                        ),
+                    )
                 )
                 
                 progress_bar.progress(70)
@@ -233,7 +241,7 @@ def process_uploaded_lease(
                     if isinstance(field_data, dict):
                         value = field_data.get("value", "NOT FOUND")
                         confidence_str = field_data.get("confidence", "LOW")
-                        source_snippet = field_data.get("source_snippet", "")
+                        source_snippet = field_data.get("source_text") or field_data.get("source_snippet", "")
                         notes_field = field_data.get("notes", "")
                     else:
                         value = str(field_data)
@@ -250,7 +258,7 @@ def process_uploaded_lease(
                         "raw_value": value,
                         "confidence": confidence_str,
                         "confidence_score": confidence_score,
-                        "source_text": source_snippet[:500] if source_snippet else "",
+                        "source_text": source_snippet[:1000] if source_snippet else "",
                         "notes": notes_field,
                         "reviewed": False,
                     }
@@ -261,11 +269,13 @@ def process_uploaded_lease(
                 progress_bar.progress(90)
                 
                 # Update lease status
-                supabase.table("leases").update({
+                lease_update = {
                     "status": "READY FOR REVIEW",
                     "extracted_data": extracted_fields,
                     "page_count": page_count
-                }).eq("id", lease_id).execute()
+                }
+                lease_update.update(lease_header_updates(extracted_fields))
+                supabase.table("leases").update(lease_update).eq("id", lease_id).execute()
                 
                 progress_bar.progress(100)
                 status_text.text("✅ Complete!")

@@ -5,11 +5,138 @@ Complete PDF → AI Extraction → Database workflow
 import os
 import re
 import json
+import time
+import threading
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 import PyPDF2
 from openai import OpenAI
 import config
+
+# Serialize GPT calls so bulk upload cannot 429 two of three leases.
+_GPT_LOCK = threading.Lock()
+_EMPTY_SOURCE = {"", "NOT FOUND", "N/A", "NA", "NONE", "NULL", "UNKNOWN", "—", "-"}
+_PAGE_IN_TEXT = re.compile(r"(?:---\s*)?(?:page|p\.?)\s*(\d{1,4})\b", re.IGNORECASE)
+
+
+def source_excerpt_from_field(field_data) -> str:
+    """Pull a verbatim excerpt from any GPT/DB source key the model used."""
+    if not isinstance(field_data, dict):
+        return ""
+    for key in (
+        "source_snippet",
+        "source_text",
+        "source_quote",
+        "excerpt",
+        "source",
+    ):
+        raw = field_data.get(key)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if text and text.upper() not in _EMPTY_SOURCE:
+            return text
+    return ""
+
+
+def with_page_prefix(excerpt: str, page=None) -> str:
+    """Keep the page number in source_text when the table has no page column."""
+    text = (excerpt or "").strip()
+    if page not in (None, ""):
+        digits = re.search(r"\d+", str(page))
+        if digits and not _PAGE_IN_TEXT.search(text):
+            prefix = f"Page {digits.group(0)}."
+            return f"{prefix} {text}".strip()
+    return text
+
+
+_PAGE_HEADER = re.compile(r"---\s*Page\s*(\d+)\s*---", re.IGNORECASE)
+
+
+def _excerpt_needles(value: str) -> List[str]:
+    compact = re.sub(r"\s+", " ", (value or "").strip())
+    needles: List[str] = []
+    if len(compact) >= 10:
+        needles.append(compact)
+        if len(compact) > 90:
+            needles.append(compact[:90].rstrip(" ,;."))
+    needles.extend(re.findall(r"\$[\d,]+(?:\.\d{2})?", compact))
+    needles.extend(re.findall(r"\d{4}-\d{2}-\d{2}", compact))
+    seen = set()
+    unique = []
+    for needle in needles:
+        key = needle.lower()
+        if key in seen or len(needle) < 5:
+            continue
+        seen.add(key)
+        unique.append(needle)
+    return unique
+
+
+def find_excerpt_in_lease(lease_text: str, value: str, radius: int = 160) -> str:
+    """If GPT omitted source_snippet, quote the surrounding lease text."""
+    text = lease_text or ""
+    if not text or not value:
+        return ""
+    lower = text.lower()
+    for needle in _excerpt_needles(value):
+        idx = lower.find(needle.lower())
+        if idx < 0 and "," in needle:
+            idx = lower.find(needle.lower().replace(",", ""))
+        if idx < 0:
+            continue
+        start = max(0, idx - radius)
+        end = min(len(text), idx + len(needle) + radius)
+        snippet = text[start:end]
+        page = None
+        for match in _PAGE_HEADER.finditer(text[: idx + 1]):
+            page = match.group(1)
+        snippet = _PAGE_HEADER.sub(" ", snippet)
+        snippet = re.sub(r"\s+", " ", snippet).strip(" -")
+        return with_page_prefix(snippet, page)
+    return ""
+
+
+def attach_missing_excerpts(lease_text: str, extracted_fields: Optional[Dict]) -> Dict:
+    """Fill empty excerpts from the PDF text so reports can cite the lease."""
+    attached: Dict = {}
+    for name, data in (extracted_fields or {}).items():
+        if not isinstance(data, dict):
+            attached[name] = data
+            continue
+        row = dict(data)
+        value = str(row.get("value") or "").strip()
+        if not value or value.upper() in _EMPTY_SOURCE:
+            attached[name] = row
+            continue
+        if source_excerpt_from_field(row):
+            attached[name] = row
+            continue
+        excerpt = find_excerpt_in_lease(lease_text, value)
+        if excerpt:
+            row["source_snippet"] = excerpt
+            row["source_text"] = excerpt
+        attached[name] = row
+    return attached
+
+
+def normalize_extracted_fields(extracted_fields: Optional[Dict]) -> Dict:
+    """Copy excerpts onto source_snippet/source_text so client reports can cite them."""
+    normalized: Dict = {}
+    for name, data in (extracted_fields or {}).items():
+        if not isinstance(data, dict):
+            data = {"value": str(data), "confidence": "LOW", "source_snippet": ""}
+        else:
+            data = dict(data)
+        excerpt = with_page_prefix(
+            source_excerpt_from_field(data),
+            data.get("source_page") or data.get("page"),
+        )
+        if excerpt:
+            data["source_snippet"] = excerpt
+            data["source_text"] = excerpt
+        normalized[name] = data
+    return normalized
 
 
 class LeaseExtractionPipeline:
@@ -158,7 +285,8 @@ class LeaseExtractionPipeline:
                 
                 for page_num in range(page_count):
                     page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n\n"
+                    text += f"\n\n--- Page {page_num + 1} ---\n\n"
+                    text += page.extract_text() or ""
             
             text = text.strip()
             
@@ -382,6 +510,9 @@ IMPORTANT INSTRUCTIONS:
 - Extract COMPLETE clauses - do not truncate mid-sentence
 - Be thorough but precise - don't invent information
 - For long clauses, capture the FULL text in the value field
+- For every field that is found, copy a verbatim source_snippet from the lease. Do not leave source_snippet empty when confidence is HIGH or MEDIUM.
+- If a "--- Page N ---" marker is near the excerpt, set source_page to N.
+- If the field is genuinely not in the lease, set value to NOT FOUND, confidence LOW, and source_snippet to an empty string.
 
 Fields to extract:
 {chr(10).join(f"{i+1}. {field}" for i, field in enumerate(self.lease_fields))}
@@ -398,7 +529,8 @@ Return your response as a JSON object with this exact structure:
   "field_name": {{
     "value": "extracted value or NOT FOUND",
     "confidence": "HIGH|MEDIUM|LOW",
-    "source_snippet": "relevant text from lease (first 200 chars)",
+    "source_snippet": "verbatim excerpt from the lease, including the nearby heading if present (first 300 chars)",
+    "source_page": "page number if visible in the document text, otherwise omit",
     "notes": "any clarifications or reasoning"
   }}
 }}
@@ -407,7 +539,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
 """
         
         try:
-            response = self.client.chat.completions.create(
+            response = self._chat_completion_with_retry(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are an expert lease abstraction specialist with 20 years of experience in commercial real estate. Extract data accurately and provide confidence scores. Extract COMPLETE clauses without truncation."},
@@ -438,6 +570,37 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
             raise Exception(f"Failed to parse GPT-4 response as JSON: {str(e)}")
         except Exception as e:
             raise Exception(f"GPT-4 extraction failed: {str(e)}")
+
+    def _chat_completion_with_retry(self, **kwargs):
+        """Retry transient OpenAI errors so a 429 does not drop the rest of a batch."""
+        last_error = None
+        with _GPT_LOCK:
+            for attempt in range(4):
+                try:
+                    return self.client.chat.completions.create(**kwargs)
+                except Exception as exc:
+                    last_error = exc
+                    text = str(exc).lower()
+                    retryable = any(
+                        token in text
+                        for token in (
+                            "rate limit",
+                            "429",
+                            "timeout",
+                            "temporar",
+                            "overloaded",
+                            "503",
+                            "502",
+                            "connection",
+                            "try again",
+                        )
+                    )
+                    if not retryable or attempt == 3:
+                        raise
+                    wait = min(2 ** attempt, 8)
+                    print(f"⚠ OpenAI error (attempt {attempt + 1}/4), retrying in {wait}s: {exc}")
+                    time.sleep(wait)
+        raise last_error
     
     def calculate_confidence_score(self, confidence_str: str) -> float:
         """
@@ -593,16 +756,22 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"✓ Lease created with ID: {lease_id}")
         
         print(f"[4/6] Extracting fields with GPT-4 (this takes 20-40 seconds)...")
-        extracted_fields = self.extract_fields_with_gpt4(lease_text, property_address, tenant_name)
+        extracted_fields = normalize_extracted_fields(
+            attach_missing_excerpts(
+                lease_text,
+                self.extract_fields_with_gpt4(lease_text, property_address, tenant_name),
+            )
+        )
         print(f"✓ Extracted {len(extracted_fields)} fields")
         
         print(f"[5/6] Saving extracted fields to database...")
+        field_records = []
         field_number = 1
         for field_name, field_data in extracted_fields.items():
             if isinstance(field_data, dict):
                 value = field_data.get("value", "NOT FOUND")
                 confidence_str = field_data.get("confidence", "LOW")
-                source_snippet = field_data.get("source_snippet", "")
+                source_snippet = field_data.get("source_text") or field_data.get("source_snippet") or ""
                 notes = field_data.get("notes", "")
             else:
                 value = str(field_data)
@@ -611,29 +780,40 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 notes = ""
             
             confidence_score = self.calculate_confidence_score(confidence_str)
-            
-            field_record = {
+            field_records.append({
                 "lease_id": lease_id,
                 "field_name": field_name,
                 "field_number": field_number,
                 "raw_value": value,
                 "confidence": confidence_str,
                 "confidence_score": confidence_score,
-                "source_text": source_snippet[:500] if source_snippet else "",
+                "source_text": source_snippet[:1000] if source_snippet else "",
                 "notes": notes,
                 "reviewed": False,
-            }
-            
-            supabase_client.table("extracted_fields").insert(field_record).execute()
+            })
             field_number += 1
+
+        if field_records:
+            try:
+                supabase_client.table("extracted_fields").insert(field_records).execute()
+            except Exception as batch_error:
+                print(f"⚠ Batch field insert failed ({batch_error}); inserting one at a time")
+                for record in field_records:
+                    supabase_client.table("extracted_fields").insert(record).execute()
         
-        print(f"✓ Saved {field_number - 1} fields")
+        print(f"✓ Saved {len(field_records)} fields")
         
         print(f"[6/7] Updating lease status to READY FOR REVIEW...")
-        supabase_client.table("leases").update({
+        from lease_header import lease_header_updates
+
+        lease_update = {
             "status": "READY FOR REVIEW",
             "extracted_data": extracted_fields,
-        }).eq("id", lease_id).execute()
+        }
+        lease_update.update(lease_header_updates(extracted_fields))
+        supabase_client.table("leases").update(lease_update).eq("id", lease_id).execute()
+        if lease_update.get("tenant_name"):
+            print(f"✓ Lease header tenant: {lease_update['tenant_name']}")
         print(f"✓ Lease status updated")
         
         print(f"[7/8] Extracting and adding critical dates...")
