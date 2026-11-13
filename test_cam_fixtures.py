@@ -19,6 +19,7 @@ from cam_engine import (  # noqa: E402
     reconcile_cam_charges,
 )
 from cam_gpt_extractor import extract_text_from_pdf  # noqa: E402
+from cam_pdf_report import generate_cam_pdf_report  # noqa: E402
 
 
 def _pdf_text(path: Path) -> str:
@@ -156,6 +157,16 @@ class EngineMathTests(unittest.TestCase):
         self.assertEqual(merged["cam_cap_percentage"], 5.0)
         self.assertAlmostEqual(merged["tenant_prorata_share"], 0.125, places=4)
 
+    def test_enrich_reads_base_amount_and_audit_fields(self):
+        merged = enrich_cam_provisions({}, {
+            "CAM Base Amount": "$100,000.00 tenant share in CAM Base Year 2023",
+            "Tenant Audit Rights": "Yes. Tenant is ALLOWED to inspect.",
+            "Audit Deadline": "Within 90 days of receipt of the annual CAM reconciliation",
+        })
+        self.assertEqual(merged["cam_base_amount"], 100000.00)
+        self.assertTrue(merged["tenant_audit_right"])
+        self.assertIn("90 days", merged["audit_deadline"])
+
     def test_overcharge_is_critical(self):
         analysis = detect_discrepancies(
             S.TENANT_SHARE_BILLED,
@@ -243,6 +254,208 @@ class StatementParseTests(unittest.TestCase):
         challenged = [item for item in analyzed if item["should_challenge"]]
         self.assertEqual(len(challenged), 5)
         self.assertEqual(sum(item["variance"] for item in challenged), 379000.00)
+
+
+def _northridge_workpaper_bytes():
+    parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))
+    result = reconcile_cam_charges(
+        S.BUILDING_TOTAL_CHARGES,
+        S.TENANT_SHARE_BILLED,
+        S.PROVISIONS_FOR_ENGINE,
+        parsed["line_items"],
+    )
+    provisions = dict(S.PROVISIONS_FOR_ENGINE)
+    provisions.update({
+        "tenant_square_footage": S.PREMISES_RSF,
+        "building_square_footage": S.BUILDING_RSF,
+        "tenant_audit_right": S.TENANT_AUDIT_RIGHT,
+        "audit_deadline": S.AUDIT_DEADLINE,
+    })
+    lease_data = {
+        "property_address": S.PROPERTY_ADDRESS,
+        "tenant_name": S.TENANT_NAME,
+        "landlord_name": S.LANDLORD_NAME,
+    }
+    recon = {
+        "reconciliation_year": S.RECONCILIATION_YEAR,
+        "statement_date": S.STATEMENT_DATE,
+        "landlord_total_charges": S.BUILDING_TOTAL_CHARGES,
+        "landlord_tenant_share": S.TENANT_SHARE_BILLED,
+        "calculated_tenant_share": result["calculated_tenant_share"],
+        "variance_amount": result["variance_amount"],
+        "variance_percentage": result["variance_amount"] / S.TENANT_SHARE_BILLED * 100,
+        "calculations": result["calculations"],
+        "excluded_building_charges": result["excluded_building_charges"],
+        "allowable_building_charges": result["allowable_building_charges"],
+        "cam_cap_applied": result.get("cam_cap_applied"),
+    }
+    return generate_cam_pdf_report(
+        lease_data,
+        recon,
+        result["analyzed_line_items"],
+        provisions,
+    ), result
+
+
+class CamWorkpaperTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.pdf_bytes, cls.result = _northridge_workpaper_bytes()
+        cls.path = ROOT / "tests" / "fixtures" / "cam" / "_generated_workpaper.pdf"
+        cls.path.write_bytes(cls.pdf_bytes)
+        cls.text = _pdf_text(cls.path)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.path.exists():
+            cls.path.unlink()
+
+    def test_workpaper_is_a_pdf(self):
+        self.assertTrue(self.pdf_bytes.startswith(b"%PDF"))
+
+    def test_labels_are_tenant_share_not_landlords_charges(self):
+        self.assertIn("CAM Reconciliation Workpaper", self.text)
+        self.assertIn("Tenant share", self.text)
+        self.assertNotIn("Landlord's Charges", self.text)
+        self.assertNotIn("Calculated Per Lease", self.text)
+
+    def test_math_and_challenge_recommendation(self):
+        for needle in (
+            "1,200,000.00",
+            "150,000.00",
+            "102,625.00",
+            "47,375.00",
+            "821,000.00",
+            "379,000.00",
+            "CHALLENGE",
+            "Cascade Analytics",
+            "1200 Cascade Plaza",
+            "Northridge Office Partners",
+        ):
+            self.assertIn(needle, self.text, f"workpaper missing {needle!r}")
+
+    def test_all_statement_lines_and_exclusion_flags(self):
+        self.assertIn("Roof replacement", self.text)
+        self.assertIn("Structural steel", self.text)
+        self.assertIn("Depreciation", self.text)
+        self.assertIn("Mortgage interest", self.text)
+        self.assertIn("Legal fees", self.text)
+        self.assertIn("Window washing", self.text)
+        self.assertIn("HVAC maintenance", self.text)
+        self.assertNotIn("Hvac", self.text)
+        self.assertGreaterEqual(self.text.count("Challenge"), 5)
+        self.assertGreaterEqual(self.text.count("Allow"), 18)
+        self.assertIn("roof replacement is", self.text.lower())
+        self.assertIn("excluded per lease terms", self.text)
+        self.assertIn("$100,000.00", self.text)
+        self.assertIn("Within 90 days of receipt of the annual CAM reconciliation", self.text)
+        self.assertNotIn("Landlord'S", self.text)
+
+    def test_exclusions_are_listed_once_without_title_case(self):
+        description = (
+            "capital improvements, structural repairs, roof replacement, depreciation, "
+            "debt service, mortgage payments, legal fees relating to other tenants "
+            "or to Landlord's financing"
+        )
+        pdf_bytes = generate_cam_pdf_report(
+            {"property_address": S.PROPERTY_ADDRESS, "tenant_name": S.TENANT_NAME},
+            {
+                "reconciliation_year": 2025,
+                "statement_date": S.STATEMENT_DATE,
+                "landlord_total_charges": S.BUILDING_TOTAL_CHARGES,
+                "landlord_tenant_share": S.TENANT_SHARE_BILLED,
+                "calculated_tenant_share": 102625.00,
+                "variance_amount": 47375.00,
+                "excluded_building_charges": 379000.00,
+                "allowable_building_charges": 821000.00,
+                "cam_cap_applied": False,
+            },
+            assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))["line_items"],
+            {
+                "tenant_prorata_share": S.TENANT_PRORATA_SHARE,
+                "has_cam_cap": True,
+                "cam_cap_percentage": 5.0,
+                "cam_base_amount": None,
+                "excluded_items": [part.strip() for part in description.split(",")],
+                "exclusions_description": description,
+            },
+        )
+        text = _pdf_text_from_bytes(pdf_bytes)
+        self.assertIn("legal fees relating to other tenants", text)
+        self.assertIn("Landlord's financing", text)
+        self.assertNotIn("Landlord'S", text)
+        self.assertNotIn("Legal Fees Relating To", text)
+        self.assertIn("base-year tenant CAM amount", text)
+        self.assertIn("this file", text)
+        self.assertNotIn("CAM Base Amount was not stored", text)
+
+    def test_unanalyzed_items_are_flagged_in_the_pdf(self):
+        parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))
+        pdf_bytes = generate_cam_pdf_report(
+            {"property_address": S.PROPERTY_ADDRESS, "tenant_name": S.TENANT_NAME},
+            {
+                "reconciliation_year": 2025,
+                "statement_date": S.STATEMENT_DATE,
+                "landlord_total_charges": S.BUILDING_TOTAL_CHARGES,
+                "landlord_tenant_share": S.TENANT_SHARE_BILLED,
+                "calculated_tenant_share": 102625.00,
+                "variance_amount": 47375.00,
+                "excluded_building_charges": 379000.00,
+                "allowable_building_charges": 821000.00,
+            },
+            parsed["line_items"],
+            S.PROVISIONS_FOR_ENGINE,
+        )
+        text = _pdf_text_from_bytes(pdf_bytes)
+        self.assertIn("Challenge", text)
+        self.assertIn("Roof replacement", text)
+
+
+def _pdf_text_from_bytes(pdf_bytes: bytes) -> str:
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+        handle.write(pdf_bytes)
+        path = Path(handle.name)
+    try:
+        return _pdf_text(path)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+class CamReportEmailTests(unittest.TestCase):
+    def test_send_cam_report_email_attaches_pdf(self):
+        from unittest.mock import MagicMock, patch
+        try:
+            import email_delivery
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"email stack not installed: {exc}")
+
+        pdf_bytes, _result = _northridge_workpaper_bytes()
+        fake_response = MagicMock(status_code=202)
+        with patch.object(email_delivery, "SendGridAPIClient") as client_cls, \
+                patch.object(email_delivery.config, "SENDGRID_API_KEY", "sg-test-key"):
+            client_cls.return_value.send.return_value = fake_response
+            sent = email_delivery.send_cam_report_email(
+                recipient_email="cfo@cascade.test",
+                recipient_name="Jordan Hale",
+                property_address=S.PROPERTY_ADDRESS,
+                tenant_name=S.TENANT_NAME,
+                year=2025,
+                pdf_bytes=pdf_bytes,
+                billed_share=150000,
+                allowed_share=102625,
+                variance_amount=47375,
+                recommendation="CHALLENGE",
+            )
+        self.assertTrue(sent)
+        message = client_cls.return_value.send.call_args[0][0]
+        payload = message.get()
+        self.assertIn("CAM Reconciliation Workpaper", str(payload.get("subject")))
+        attachments = payload.get("attachments") or []
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].get("type"), "application/pdf")
+        self.assertTrue(str(attachments[0].get("filename", "")).endswith(".pdf"))
 
 
 if __name__ == "__main__":
