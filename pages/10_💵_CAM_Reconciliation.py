@@ -4,6 +4,13 @@ import os
 from datetime import datetime
 import json
 
+from cam_engine import (
+    analyze_line_items,
+    defaults_from_parsed_statement,
+    enrich_cam_provisions,
+    reconcile_cam_charges,
+)
+
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="LeaseAI CAM Reconciliation",
@@ -95,6 +102,95 @@ def format_currency(amount):
     if amount is None:
         return "N/A"
     return f"${amount:,.2f}"
+
+def get_openai_api_key():
+    """Read OpenAI from Streamlit secrets or local config/.env. Never fail if secrets.toml is missing."""
+    try:
+        key = st.secrets["OPENAI_API_KEY"]
+        if key:
+            return key
+    except Exception:
+        pass
+    try:
+        import config as app_config
+        key = getattr(app_config, "OPENAI_API_KEY", None)
+        if key and not str(key).startswith("your-"):
+            return key
+    except Exception:
+        pass
+    return None
+
+def init_cam_form_state():
+    """Create Step 2 widget keys before the inputs render."""
+    today = datetime.now()
+    st.session_state.setdefault("cam_recon_year", today.year - 1)
+    st.session_state.setdefault("cam_statement_date", today.date())
+    st.session_state.setdefault("cam_landlord_total", 0.0)
+    st.session_state.setdefault("cam_tenant_share_billed", 0.0)
+
+def store_parsed_statement(parsed):
+    """Copy statement totals into Step 2 and queue an automatic calculation."""
+    defaults = defaults_from_parsed_statement(parsed)
+    st.session_state["parsed_cam_statement"] = parsed
+    st.session_state["cam_recon_year"] = int(defaults["recon_year"])
+    st.session_state["cam_statement_date"] = defaults["statement_date"]
+    st.session_state["cam_landlord_total"] = float(defaults["landlord_total"])
+    st.session_state["cam_tenant_share_billed"] = float(defaults["tenant_share_billed"])
+    st.session_state["cam_run_calc_after_parse"] = True
+    n = parsed.get("total_line_items") or len(parsed.get("line_items") or [])
+    st.session_state["cam_parse_message"] = (
+        f"Extracted {n} line items and filled the reconciliation totals from the statement."
+    )
+
+def load_extracted_field_map(lease_id):
+    """Lease abstract fields keyed by name, for filling blank CAM terms."""
+    try:
+        fields_res = sb.table("extracted_fields").select("*").eq("lease_id", lease_id).execute()
+    except Exception:
+        return {}
+    mapped = {}
+    for field in fields_res.data or []:
+        name = field.get("field_name")
+        if not name:
+            continue
+        mapped[name] = field.get("reviewed_value") or field.get("raw_value")
+    return mapped
+
+def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, landlord_total, tenant_share_billed):
+    """Compare billed tenant share to the amount allowed by the lease."""
+    landlord_total = float(landlord_total or 0)
+    tenant_share_billed = float(tenant_share_billed or 0)
+    provisions = enrich_cam_provisions(cam_provisions, load_extracted_field_map(lease_id))
+    parsed = st.session_state.get("parsed_cam_statement") or {}
+    line_items = parsed.get("line_items") or []
+    calc_result = reconcile_cam_charges(
+        landlord_total,
+        tenant_share_billed,
+        provisions,
+        line_items,
+    )
+    calculated_share = calc_result["calculated_tenant_share"]
+    variance = tenant_share_billed - calculated_share
+    variance_percentage = (
+        ((tenant_share_billed - calculated_share) / tenant_share_billed * 100)
+        if tenant_share_billed else 0
+    )
+    st.session_state["cam_calc_results"] = {
+        "lease_id": lease_id,
+        "recon_year": recon_year,
+        "statement_date": statement_date,
+        "landlord_total": landlord_total,
+        "tenant_share_billed": tenant_share_billed,
+        "calculated_share": calculated_share,
+        "variance": variance,
+        "variance_percentage": variance_percentage,
+        "calculations": calc_result.get("calculations") or [],
+        "excluded_building_charges": calc_result.get("excluded_building_charges") or 0,
+        "allowable_building_charges": calc_result.get("allowable_building_charges"),
+        "cam_cap_applied": calc_result.get("cam_cap_applied"),
+        "provisions_used": provisions,
+    }
+    return st.session_state["cam_calc_results"]
 
 def get_severity_badge(severity):
     """Return colored badge for severity"""
@@ -238,6 +334,10 @@ with tab1:
 
 with tab2:
     st.markdown("### Create New CAM Reconciliation")
+    init_cam_form_state()
+    parse_message = st.session_state.pop("cam_parse_message", None)
+    if parse_message:
+        st.success(parse_message)
     
     # Step 1: Select Lease
     st.markdown("#### Step 1: Select Lease")
@@ -305,9 +405,9 @@ with tab2:
                             import openai
                             
                             # Get OpenAI API key
-                            api_key = st.secrets.get("OPENAI_API_KEY")
+                            api_key = get_openai_api_key()
                             if not api_key:
-                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to .env or config.py.")
                             else:
                                 # Fetch lease text
                                 lease_res = sb.table("leases").select("*").eq("id", selected_lease_id).execute()
@@ -352,46 +452,12 @@ with tab2:
         
         st.markdown("---")
         
-        # Step 2: Reconciliation Details
-        st.markdown("#### Step 2: Reconciliation Details")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            recon_year = st.number_input(
-                "Reconciliation Year",
-                min_value=2020,
-                max_value=datetime.now().year,
-                value=datetime.now().year - 1
-            )
-            
-            statement_date = st.date_input(
-                "CAM Statement Date",
-                value=datetime.now()
-            )
-        
-        with col2:
-            landlord_total = st.number_input(
-                "Total Landlord Charges (from CAM statement)",
-                min_value=0.0,
-                value=0.0,
-                step=100.0,
-                format="%.2f"
-            )
-            
-            tenant_share_billed = st.number_input(
-                "Tenant Share Billed (your portion)",
-                min_value=0.0,
-                value=0.0,
-                step=100.0,
-                format="%.2f"
-            )
-        
-        st.markdown("---")
-        
-        # Step 3: Upload CAM Statement (optional)
-        st.markdown("#### Step 3: Upload Landlord CAM Statement (Optional)")
-        st.caption("Upload the PDF or CSV of the landlord's CAM reconciliation statement for automatic line-item extraction")
+        # Step 2: Upload CAM Statement — this fills the totals below
+        st.markdown("#### Step 2: Upload Landlord CAM Statement")
+        st.caption(
+            "Upload the landlord's year-end CAM PDF and parse it. The app reads every numbered "
+            "line, fills year / date / building total / tenant share, and reconciles against this lease."
+        )
         
         uploaded_file = st.file_uploader(
             "Upload CAM Statement",
@@ -400,60 +466,42 @@ with tab2:
             key="cam_statement_upload"
         )
         
-        parsed_line_items = []
-        parsed_metadata = {}
-        
         if uploaded_file:
             st.success(f"✅ File uploaded: {uploaded_file.name}")
             
             if st.button("🤖 Parse CAM Statement with AI", use_container_width=True, type="primary"):
-                with st.spinner("Parsing CAM statement using GPT-4o..."):
+                with st.spinner("Parsing CAM statement..."):
                     try:
                         from cam_gpt_extractor import parse_cam_statement_with_gpt, extract_text_from_pdf
+                        from cam_engine import assemble_cam_statement
                         import tempfile
                         
-                        # Get OpenAI API key
-                        api_key = st.secrets.get("OPENAI_API_KEY")
-                        if not api_key:
-                            st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                        api_key = get_openai_api_key()
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                            tmp_file.write(uploaded_file.getvalue())
+                            tmp_path = tmp_file.name
+                        
+                        statement_text = extract_text_from_pdf(tmp_path)
+                        os.unlink(tmp_path)
+                        
+                        if not statement_text:
+                            st.error("Failed to extract text from PDF")
                         else:
-                            # Save uploaded file temporarily
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                                tmp_file.write(uploaded_file.getvalue())
-                                tmp_path = tmp_file.name
+                            parsed_data = None
+                            if api_key:
+                                try:
+                                    parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
+                                except Exception:
+                                    parsed_data = None
+                            if not parsed_data or (parsed_data.get("error") and not parsed_data.get("line_items")):
+                                parsed_data = assemble_cam_statement(statement_text)
                             
-                            # Extract text from PDF
-                            statement_text = extract_text_from_pdf(tmp_path)
-                            
-                            if not statement_text:
-                                st.error("Failed to extract text from PDF")
+                            if parsed_data.get('error') and not parsed_data.get('line_items'):
+                                st.error(f"Parsing failed: {parsed_data['error']}")
                             else:
-                                # Parse with GPT-4o
-                                parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
-                                
-                                if parsed_data.get('error'):
-                                    st.error(f"Parsing failed: {parsed_data['error']}")
-                                else:
-                                    st.success(f"✅ Extracted {parsed_data.get('total_line_items', 0)} line items!")
-                                    st.balloons()
-                                    
-                                    # Store in session state
-                                    st.session_state['parsed_cam_statement'] = parsed_data
-                                    parsed_line_items = parsed_data.get('line_items', [])
-                                    parsed_metadata = parsed_data
-                                    
-                                    # Auto-fill fields if available
-                                    if parsed_data.get('total_building_charges'):
-                                        landlord_total = float(parsed_data['total_building_charges'])
-                                        st.info(f"Auto-filled: Total Building Charges = ${landlord_total:,.2f}")
-                                    
-                                    if parsed_data.get('tenant_share_billed'):
-                                        tenant_share_billed = float(parsed_data['tenant_share_billed'])
-                                        st.info(f"Auto-filled: Tenant Share Billed = ${tenant_share_billed:,.2f}")
-                            
-                            # Clean up temp file
-                            import os
-                            os.unlink(tmp_path)
+                                store_parsed_statement(parsed_data)
+                                st.rerun()
                     
                     except Exception as e:
                         st.error(f"Parsing error: {str(e)}")
@@ -465,73 +513,122 @@ with tab2:
             
             if line_items:
                 st.markdown("### 📊 Extracted Line Items")
-                st.write(f"**Total items:** {len(line_items)}")
+                analyzed_items = analyze_line_items(line_items, cam_provisions or {})
+                challenged = [item for item in analyzed_items if item.get("should_challenge")]
+                st.write(f"**Total items:** {len(analyzed_items)}")
+                if challenged:
+                    st.warning(
+                        f"{len(challenged)} line item(s) look excluded under this lease "
+                        f"(capital, structural, legal, depreciation, or debt service)."
+                    )
+                elif not cam_provisions:
+                    st.caption("Extract CAM provisions on this lease to flag excluded rows here.")
                 
-                # Display in table
                 import pandas as pd
-                df = pd.DataFrame(line_items)
+                rows = []
+                for item in analyzed_items:
+                    amount = item.get("amount", item.get("landlord_amount", 0)) or 0
+                    rows.append({
+                        "#": item.get("line_number"),
+                        "Description": item.get("description"),
+                        "Category": item.get("category"),
+                        "Amount": f"${float(amount):,.2f}",
+                        "Flag": "Challenge" if item.get("should_challenge") else "OK",
+                        "Reason": item.get("dispute_reason") or "",
+                    })
+                df = pd.DataFrame(rows)
                 if not df.empty:
-                    # Format amount column
-                    if 'amount' in df.columns:
-                        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
-                    
                     st.dataframe(df, use_container_width=True, hide_index=True)
                     
-                    # Summary by category
                     with st.expander("📈 Summary by Category"):
-                        # Recreate numeric column for grouping
-                        line_items_for_summary = parsed_data.get('line_items', [])
-                        if line_items_for_summary:
-                            category_totals = {}
-                            for item in line_items_for_summary:
-                                cat = item.get('category', 'OTHER')
-                                amt = float(item.get('amount', 0))
-                                category_totals[cat] = category_totals.get(cat, 0) + amt
-                            
-                            for cat, total in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
-                                st.write(f"**{cat}:** ${total:,.2f}")
+                        category_totals = {}
+                        for item in analyzed_items:
+                            cat = item.get('category', 'OTHER')
+                            amt = float(item.get('amount', item.get('landlord_amount', 0)) or 0)
+                            category_totals[cat] = category_totals.get(cat, 0) + amt
+                        for cat, total in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+                            st.write(f"**{cat}:** ${total:,.2f}")
+        
+        st.markdown("---")
+        
+        # Step 3: totals — auto-filled from the parsed statement
+        st.markdown("#### Step 3: Reconciliation Details")
+        if st.session_state.get("parsed_cam_statement"):
+            st.success("Filled from the CAM statement. Change a value only if the PDF was read wrong.")
+        else:
+            st.caption("These fill automatically after you parse the statement. You should not need to type them.")
+        
+        col1, col2 = st.columns(2)
+        max_year = max(datetime.now().year, int(st.session_state.get("cam_recon_year") or datetime.now().year))
+        
+        with col1:
+            recon_year = st.number_input(
+                "Reconciliation Year",
+                min_value=2020,
+                max_value=max_year,
+                key="cam_recon_year",
+            )
+            
+            statement_date = st.date_input(
+                "CAM Statement Date",
+                key="cam_statement_date",
+            )
+        
+        with col2:
+            landlord_total = st.number_input(
+                "Total Landlord Charges (from CAM statement)",
+                min_value=0.0,
+                step=100.0,
+                format="%.2f",
+                key="cam_landlord_total",
+            )
+            
+            tenant_share_billed = st.number_input(
+                "Tenant Share Billed (your portion)",
+                min_value=0.0,
+                step=100.0,
+                format="%.2f",
+                key="cam_tenant_share_billed",
+            )
         
         st.markdown("---")
         
         # Step 4: Calculate & Review
         st.markdown("#### Step 4: Calculate & Review")
         
-        if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
+        if st.session_state.pop("cam_run_calc_after_parse", False):
             if landlord_total > 0 and tenant_share_billed > 0:
                 try:
-                    from cam_engine import calculate_cam_charges
-                    
-                    # Calculate correct tenant share
-                    if cam_provisions:
-                        calc_result = calculate_cam_charges(landlord_total, cam_provisions)
-                        calculated_share = calc_result['calculated_tenant_share']
-                    else:
-                        # Fallback: assume direct billing
-                        calculated_share = tenant_share_billed
-                        calc_result = {'calculated_tenant_share': calculated_share}
-                    
-                    # Calculate variance
-                    variance = tenant_share_billed - calculated_share
-                    variance_percentage = ((tenant_share_billed - calculated_share) / tenant_share_billed * 100) if tenant_share_billed > 0 else 0
-                    
-                    # Store in session state so it persists across reruns
-                    st.session_state['cam_calc_results'] = {
-                        'lease_id': selected_lease_id,
-                        'recon_year': recon_year,
-                        'statement_date': statement_date,
-                        'landlord_total': landlord_total,
-                        'tenant_share_billed': tenant_share_billed,
-                        'calculated_share': calculated_share,
-                        'variance': variance,
-                        'variance_percentage': variance_percentage
-                    }
-                    
-                    st.success("✅ Calculation complete! Results shown below.")
-                    
+                    run_cam_calculation(
+                        selected_lease_id,
+                        cam_provisions,
+                        recon_year,
+                        statement_date,
+                        landlord_total,
+                        tenant_share_billed,
+                    )
+                    st.success("Reconciliation calculated from this lease and the CAM statement.")
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
             else:
-                st.warning("Please enter both the landlord total charges and tenant share billed amounts.")
+                st.warning("The statement was parsed, but building total or tenant share billed is still 0. Check the PDF totals in Step 3.")
+
+        if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
+            if landlord_total > 0 and tenant_share_billed > 0:
+                try:
+                    run_cam_calculation(
+                        selected_lease_id,
+                        cam_provisions,
+                        recon_year,
+                        statement_date,
+                        landlord_total,
+                        tenant_share_billed,
+                    )
+                    st.success("✅ Calculation complete! Results shown below.")
+                except Exception as e:
+                    st.error(f"Calculation error: {str(e)}")
+            else:
+                st.warning("Parse the CAM statement, or enter both the landlord total charges and tenant share billed amounts.")
         
         # Show results if they exist in session state
         if 'cam_calc_results' in st.session_state:
@@ -571,6 +668,15 @@ with tab2:
                 st.warning("⚠️ Moderate variance found (< $500). Recommended action: REQUEST CLARIFICATION")
             else:
                 st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
+
+            steps = results.get("calculations") or []
+            if steps:
+                st.markdown("#### How this number was calculated")
+                for step in steps:
+                    st.write(
+                        f"- **{step.get('step')}:** {step.get('formula')} = "
+                        f"{format_currency(step.get('result'))}"
+                    )
             
             st.markdown("---")
             

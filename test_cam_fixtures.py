@@ -11,9 +11,14 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "cam"))
 import scenario as S  # noqa: E402
 from cam_engine import (  # noqa: E402
     analyze_line_items,
+    assemble_cam_statement,
     calculate_cam_charges,
+    defaults_from_parsed_statement,
     detect_discrepancies,
+    enrich_cam_provisions,
+    reconcile_cam_charges,
 )
+from cam_gpt_extractor import extract_text_from_pdf  # noqa: E402
 
 
 def _pdf_text(path: Path) -> str:
@@ -96,6 +101,61 @@ class EngineMathTests(unittest.TestCase):
         self.assertTrue(result["cam_cap_applied"])
         self.assertEqual(result["calculated_tenant_share"], S.CALCULATED_TENANT_SHARE)
 
+    def test_none_prorata_falls_back_to_square_footage(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": None,
+            "tenant_square_footage": S.PREMISES_RSF,
+            "building_square_footage": S.BUILDING_RSF,
+            "has_cam_cap": True,
+            "cam_cap_percentage": S.CAM_CAP_PERCENTAGE,
+            "cam_base_amount": S.CAM_BASE_AMOUNT,
+        })
+        self.assertEqual(result["calculated_tenant_share"], S.CALCULATED_TENANT_SHARE)
+
+    def test_none_cap_fields_do_not_crash(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": None,
+            "has_cam_cap": True,
+            "cam_cap_percentage": None,
+            "cam_base_amount": None,
+        })
+        self.assertEqual(result["calculated_tenant_share"], 0.0)
+        self.assertFalse(result["cam_cap_applied"])
+
+    def test_missing_base_amount_does_not_cap_against_this_year(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": S.TENANT_PRORATA_SHARE,
+            "has_cam_cap": True,
+            "cam_cap_percentage": S.CAM_CAP_PERCENTAGE,
+            "cam_base_amount": None,
+        })
+        self.assertEqual(result["calculated_tenant_share"], S.TENANT_SHARE_BILLED)
+        self.assertFalse(result["cam_cap_applied"])
+
+    def test_reconcile_strips_exclusions_then_prorates(self):
+        parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))
+        result = reconcile_cam_charges(
+            S.BUILDING_TOTAL_CHARGES,
+            S.TENANT_SHARE_BILLED,
+            S.PROVISIONS_FOR_ENGINE,
+            parsed["line_items"],
+        )
+        self.assertEqual(result["excluded_building_charges"], 379000.00)
+        self.assertEqual(result["allowable_building_charges"], 821000.00)
+        self.assertEqual(result["calculated_tenant_share"], 102625.00)
+        self.assertEqual(result["variance_amount"], 47375.00)
+
+    def test_enrich_reads_annual_increase_cap_field_name(self):
+        merged = enrich_cam_provisions({}, {
+            "CAM Annual Increase Cap (%)": "5%",
+            "Premises Square Footage (RSF)": "12,500",
+            "Building Total Square Footage": "100,000",
+            "CAM Exclusions": "capital improvements, roof replacement, debt service",
+        })
+        self.assertTrue(merged["has_cam_cap"])
+        self.assertEqual(merged["cam_cap_percentage"], 5.0)
+        self.assertAlmostEqual(merged["tenant_prorata_share"], 0.125, places=4)
+
     def test_overcharge_is_critical(self):
         analysis = detect_discrepancies(
             S.TENANT_SHARE_BILLED,
@@ -124,6 +184,65 @@ class EngineMathTests(unittest.TestCase):
             sum(item["variance_amount"] for item in analyzed),
             sum(amount for _, _, amount in S.EXCLUDED_LINE_ITEMS),
         )
+
+    def test_exclusions_flagged_from_description_when_category_is_other(self):
+        line_items = [
+            {
+                "line_number": 19,
+                "description": "Roof replacement — full membrane (capital improvement)",
+                "category": "OTHER",
+                "amount": 180000.00,
+            }
+        ]
+        analyzed = analyze_line_items(line_items, S.PROVISIONS_FOR_ENGINE)
+        self.assertTrue(analyzed[0]["should_challenge"])
+        self.assertEqual(analyzed[0]["variance"], 180000.00)
+
+
+class StatementParseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = extract_text_from_pdf(str(S.STATEMENT_PDF))
+        cls.parsed = assemble_cam_statement(cls.text)
+
+    def test_extracts_both_pdf_pages(self):
+        self.assertIn("Window washing", self.text)
+        self.assertIn("Roof replacement", self.text)
+        self.assertIn("debt service", self.text.lower())
+
+    def test_keeps_all_23_numbered_lines(self):
+        items = self.parsed["line_items"]
+        self.assertEqual(len(items), 23)
+        descriptions = " ".join(item["description"] for item in items)
+        self.assertIn("Roof replacement", descriptions)
+        self.assertIn("Structural steel", descriptions)
+        self.assertIn("Depreciation", descriptions)
+        self.assertIn("debt service", descriptions.lower())
+        self.assertEqual(self.parsed["total_building_charges"], 1200000.00)
+        self.assertEqual(self.parsed["tenant_share_billed"], 150000.00)
+
+    def test_gpt_dropping_page_two_does_not_lose_exclusions(self):
+        incomplete_gpt = {
+            "line_items": self.parsed["line_items"][:18],
+            "total_building_charges": 821000,
+            "tenant_share_billed": 150000,
+        }
+        merged = assemble_cam_statement(self.text, incomplete_gpt)
+        self.assertEqual(len(merged["line_items"]), 23)
+        self.assertEqual(merged["total_building_charges"], 1200000.00)
+
+    def test_step_two_defaults_match_the_statement(self):
+        defaults = defaults_from_parsed_statement(self.parsed)
+        self.assertEqual(defaults["recon_year"], 2025)
+        self.assertEqual(defaults["statement_date"].isoformat(), "2026-03-15")
+        self.assertEqual(defaults["landlord_total"], 1200000.00)
+        self.assertEqual(defaults["tenant_share_billed"], 150000.00)
+
+    def test_five_planted_exclusions_are_challenged(self):
+        analyzed = analyze_line_items(self.parsed["line_items"], S.PROVISIONS_FOR_ENGINE)
+        challenged = [item for item in analyzed if item["should_challenge"]]
+        self.assertEqual(len(challenged), 5)
+        self.assertEqual(sum(item["variance"] for item in challenged), 379000.00)
 
 
 if __name__ == "__main__":
