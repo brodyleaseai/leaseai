@@ -404,55 +404,11 @@ with tab2:
         
         st.markdown("---")
         
-        # Step 2: Reconciliation Details (filled from the statement when parsed)
-        st.markdown("#### Step 2: Reconciliation Details")
+        # Step 2: Upload CAM Statement — this fills the totals below
+        st.markdown("#### Step 2: Upload Landlord CAM Statement")
         st.caption(
-            "These fill automatically after you parse the landlord CAM statement. "
-            "You can still override them. Use the building total and the tenant share billed — "
-            "not the remaining balance due."
-        )
-        
-        col1, col2 = st.columns(2)
-        max_year = max(datetime.now().year, int(st.session_state.get("cam_recon_year") or datetime.now().year))
-        
-        with col1:
-            recon_year = st.number_input(
-                "Reconciliation Year",
-                min_value=2020,
-                max_value=max_year,
-                key="cam_recon_year",
-            )
-            
-            statement_date = st.date_input(
-                "CAM Statement Date",
-                key="cam_statement_date",
-            )
-        
-        with col2:
-            landlord_total = st.number_input(
-                "Total Landlord Charges (from CAM statement)",
-                min_value=0.0,
-                step=100.0,
-                format="%.2f",
-                key="cam_landlord_total",
-            )
-            
-            tenant_share_billed = st.number_input(
-                "Tenant Share Billed (your portion)",
-                min_value=0.0,
-                step=100.0,
-                format="%.2f",
-                key="cam_tenant_share_billed",
-            )
-        
-        st.markdown("---")
-        
-        # Step 3: Upload CAM Statement
-        st.markdown("#### Step 3: Upload Landlord CAM Statement")
-        st.caption(
-            "Upload the PDF of the landlord's year-end CAM statement. Parse pulls every numbered "
-            "line (including excluded capital/debt items), fills Step 2, and runs the reconciliation "
-            "against this lease."
+            "Upload the landlord's year-end CAM PDF and parse it. The app reads every numbered "
+            "line, fills year / date / building total / tenant share, and reconciles against this lease."
         )
         
         uploaded_file = st.file_uploader(
@@ -462,46 +418,47 @@ with tab2:
             key="cam_statement_upload"
         )
         
-        parsed_line_items = []
-        parsed_metadata = {}
-        
         if uploaded_file:
             st.success(f"✅ File uploaded: {uploaded_file.name}")
             
             if st.button("🤖 Parse CAM Statement with AI", use_container_width=True, type="primary"):
-                with st.spinner("Parsing CAM statement using GPT-4o..."):
+                with st.spinner("Parsing CAM statement..."):
                     try:
                         from cam_gpt_extractor import parse_cam_statement_with_gpt, extract_text_from_pdf
+                        from cam_engine import assemble_cam_statement
                         import tempfile
                         
-                        # Get OpenAI API key
-                        api_key = st.secrets.get("OPENAI_API_KEY")
+                        api_key = st.secrets.get("OPENAI_API_KEY") if hasattr(st, "secrets") else None
                         if not api_key:
-                            st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                            try:
+                                import config as app_config
+                                candidate = getattr(app_config, "OPENAI_API_KEY", None)
+                                if candidate and not str(candidate).startswith("your-"):
+                                    api_key = candidate
+                            except Exception:
+                                api_key = None
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                            tmp_file.write(uploaded_file.getvalue())
+                            tmp_path = tmp_file.name
+                        
+                        statement_text = extract_text_from_pdf(tmp_path)
+                        import os
+                        os.unlink(tmp_path)
+                        
+                        if not statement_text:
+                            st.error("Failed to extract text from PDF")
                         else:
-                            # Save uploaded file temporarily
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                                tmp_file.write(uploaded_file.getvalue())
-                                tmp_path = tmp_file.name
-                            
-                            # Extract text from PDF
-                            statement_text = extract_text_from_pdf(tmp_path)
-                            
-                            if not statement_text:
-                                st.error("Failed to extract text from PDF")
-                            else:
-                                # Parse with GPT-4o
+                            if api_key:
                                 parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
-                                
-                                if parsed_data.get('error') and not parsed_data.get('line_items'):
-                                    st.error(f"Parsing failed: {parsed_data['error']}")
-                                else:
-                                    store_parsed_statement(parsed_data)
-                                    st.rerun()
+                            else:
+                                parsed_data = assemble_cam_statement(statement_text)
                             
-                            # Clean up temp file
-                            import os
-                            os.unlink(tmp_path)
+                            if parsed_data.get('error') and not parsed_data.get('line_items'):
+                                st.error(f"Parsing failed: {parsed_data['error']}")
+                            else:
+                                store_parsed_statement(parsed_data)
+                                st.rerun()
                     
                     except Exception as e:
                         st.error(f"Parsing error: {str(e)}")
@@ -541,6 +498,48 @@ with tab2:
         
         st.markdown("---")
         
+        # Step 3: totals — auto-filled from the parsed statement
+        st.markdown("#### Step 3: Reconciliation Details")
+        if st.session_state.get("parsed_cam_statement"):
+            st.success("Filled from the CAM statement. Change a value only if the PDF was read wrong.")
+        else:
+            st.caption("These fill automatically after you parse the statement. You should not need to type them.")
+        
+        col1, col2 = st.columns(2)
+        max_year = max(datetime.now().year, int(st.session_state.get("cam_recon_year") or datetime.now().year))
+        
+        with col1:
+            recon_year = st.number_input(
+                "Reconciliation Year",
+                min_value=2020,
+                max_value=max_year,
+                key="cam_recon_year",
+            )
+            
+            statement_date = st.date_input(
+                "CAM Statement Date",
+                key="cam_statement_date",
+            )
+        
+        with col2:
+            landlord_total = st.number_input(
+                "Total Landlord Charges (from CAM statement)",
+                min_value=0.0,
+                step=100.0,
+                format="%.2f",
+                key="cam_landlord_total",
+            )
+            
+            tenant_share_billed = st.number_input(
+                "Tenant Share Billed (your portion)",
+                min_value=0.0,
+                step=100.0,
+                format="%.2f",
+                key="cam_tenant_share_billed",
+            )
+        
+        st.markdown("---")
+        
         # Step 4: Calculate & Review
         st.markdown("#### Step 4: Calculate & Review")
         
@@ -559,7 +558,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
             else:
-                st.warning("The statement was parsed, but building total or tenant share billed is still 0. Enter those amounts in Step 2.")
+                st.warning("The statement was parsed, but building total or tenant share billed is still 0. Check the PDF totals in Step 3.")
 
         if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
             if landlord_total > 0 and tenant_share_billed > 0:
