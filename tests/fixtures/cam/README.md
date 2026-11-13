@@ -48,12 +48,11 @@ Planted excluded line items (included in the $1,200,000):
 
 ## What LeaseAI should compute
 
-The CAM page uses building total × pro-rata, then the 5% cap on the $100,000 base. It does **not** strip excluded line items out of the building total before that math. So:
-
-1. $1,200,000.00 × 0.125 = **$150,000.00**
-2. Cap: $100,000.00 + 5% = **$105,000.00**
-3. Billed $150,000.00 − calculated $105,000.00 = **$45,000.00 overcharge**
-4. Recommendation: **CHALLENGE** / critical (variance over $2,000)
+1. Remove the five excluded lines from the building total: $1,200,000 − $379,000 = **$821,000**
+2. Tenant 12.50% of allowable costs = **$102,625**
+3. Cap ceiling is $100,000 + 5% = **$105,000** (does not bind; $102,625 is below the cap)
+4. Billed $150,000 − calculated $102,625 = **$47,375 overcharge**
+5. Recommendation: **CHALLENGE**
 
 Step 2 should fill from the statement after **Parse CAM Statement with AI**. If you still need to type it:
 

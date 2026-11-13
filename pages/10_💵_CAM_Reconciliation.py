@@ -6,8 +6,9 @@ import json
 
 from cam_engine import (
     analyze_line_items,
-    calculate_cam_charges,
     defaults_from_parsed_statement,
+    enrich_cam_provisions,
+    reconcile_cam_charges,
 )
 
 # ── page config ──────────────────────────────────────────────────────────────
@@ -141,15 +142,34 @@ def store_parsed_statement(parsed):
         f"Extracted {n} line items and filled the reconciliation totals from the statement."
     )
 
+def load_extracted_field_map(lease_id):
+    """Lease abstract fields keyed by name, for filling blank CAM terms."""
+    try:
+        fields_res = sb.table("extracted_fields").select("*").eq("lease_id", lease_id).execute()
+    except Exception:
+        return {}
+    mapped = {}
+    for field in fields_res.data or []:
+        name = field.get("field_name")
+        if not name:
+            continue
+        mapped[name] = field.get("reviewed_value") or field.get("raw_value")
+    return mapped
+
 def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, landlord_total, tenant_share_billed):
     """Compare billed tenant share to the amount allowed by the lease."""
     landlord_total = float(landlord_total or 0)
     tenant_share_billed = float(tenant_share_billed or 0)
-    if cam_provisions:
-        calc_result = calculate_cam_charges(landlord_total, cam_provisions)
-        calculated_share = calc_result["calculated_tenant_share"]
-    else:
-        calculated_share = tenant_share_billed
+    provisions = enrich_cam_provisions(cam_provisions, load_extracted_field_map(lease_id))
+    parsed = st.session_state.get("parsed_cam_statement") or {}
+    line_items = parsed.get("line_items") or []
+    calc_result = reconcile_cam_charges(
+        landlord_total,
+        tenant_share_billed,
+        provisions,
+        line_items,
+    )
+    calculated_share = calc_result["calculated_tenant_share"]
     variance = tenant_share_billed - calculated_share
     variance_percentage = (
         ((tenant_share_billed - calculated_share) / tenant_share_billed * 100)
@@ -164,6 +184,11 @@ def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, la
         "calculated_share": calculated_share,
         "variance": variance,
         "variance_percentage": variance_percentage,
+        "calculations": calc_result.get("calculations") or [],
+        "excluded_building_charges": calc_result.get("excluded_building_charges") or 0,
+        "allowable_building_charges": calc_result.get("allowable_building_charges"),
+        "cam_cap_applied": calc_result.get("cam_cap_applied"),
+        "provisions_used": provisions,
     }
     return st.session_state["cam_calc_results"]
 
@@ -643,6 +668,15 @@ with tab2:
                 st.warning("⚠️ Moderate variance found (< $500). Recommended action: REQUEST CLARIFICATION")
             else:
                 st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
+
+            steps = results.get("calculations") or []
+            if steps:
+                st.markdown("#### How this number was calculated")
+                for step in steps:
+                    st.write(
+                        f"- **{step.get('step')}:** {step.get('formula')} = "
+                        f"{format_currency(step.get('result'))}"
+                    )
             
             st.markdown("---")
             

@@ -74,7 +74,8 @@ class CAMProvisionExtractor:
             extracted_fields.get('Premises Square Footage (RSF)', '')
         )
         building_sf = CAMProvisionExtractor._extract_number(
-            extracted_fields.get('Building Square Footage', '')
+            extracted_fields.get('Building Square Footage')
+            or extracted_fields.get('Building Total Square Footage', '')
         )
         
         if tenant_sf and building_sf:
@@ -82,12 +83,24 @@ class CAMProvisionExtractor:
             provisions['building_square_footage'] = building_sf
             provisions['tenant_prorata_share'] = round(tenant_sf / building_sf, 6)
         
-        # Extract CAM cap
-        if 'CAM Escalation Cap' in extracted_fields:
-            cap_text = extracted_fields['CAM Escalation Cap']
-            if cap_text and 'N/A' not in str(cap_text).upper():
+        # Extract CAM cap — field names vary by extraction prompt version
+        for cap_field in (
+            'CAM Escalation Cap',
+            'CAM Annual Increase Cap (%)',
+            'CAM Annual Increase Cap',
+        ):
+            if cap_field not in extracted_fields:
+                continue
+            cap_text = extracted_fields[cap_field]
+            if cap_text and 'N/A' not in str(cap_text).upper() and 'NOT FOUND' not in str(cap_text).upper():
                 provisions['has_cam_cap'] = True
                 provisions['cam_cap_percentage'] = CAMProvisionExtractor._extract_percentage(cap_text)
+                break
+
+        if 'Base Year for Operating Expenses' in extracted_fields and not provisions['cam_base_year']:
+            provisions['cam_base_year'] = CAMProvisionExtractor._extract_year(
+                extracted_fields['Base Year for Operating Expenses']
+            )
         
         # Extract excluded items from CAM Exclusions field
         if 'CAM Exclusions' in extracted_fields:
@@ -100,6 +113,15 @@ class CAMProvisionExtractor:
         if 'Tenant Audit Right' in extracted_fields:
             audit_text = str(extracted_fields.get('Tenant Audit Right', '')).upper()
             provisions['tenant_audit_right'] = 'YES' in audit_text or 'ALLOWED' in audit_text
+
+        if not provisions.get('cam_base_amount'):
+            for key, raw in extracted_fields.items():
+                blob = str(raw.get('value') if isinstance(raw, dict) else raw)
+                if 'CAM BASE AMOUNT' in f"{key} {blob}".upper():
+                    amount = CAMProvisionExtractor._extract_currency(blob)
+                    if amount:
+                        provisions['cam_base_amount'] = amount
+                        break
         
         return provisions
     
@@ -515,31 +537,87 @@ class CAMCalculationEngine:
             })
             tenant_share = overage
         
-        # Step 3: Apply CAM cap if applicable
+        # Step 3: Apply CAM cap against the base-year amount, never against this year's bill.
         cap_percentage = CAMCalculationEngine._as_float(
             cam_provisions.get('cam_cap_percentage'), None
         )
-        if cam_provisions.get('has_cam_cap') and cap_percentage:
+        if not cap_percentage and cam_provisions.get('has_cam_cap'):
+            cap_percentage = None
+        if cap_percentage:
             base_amount = CAMCalculationEngine._as_float(
                 cam_provisions.get('cam_base_amount'), None
             )
             if base_amount is None:
-                base_amount = tenant_share
-            
-            max_increase = base_amount * (cap_percentage / 100)
-            capped_amount = base_amount + max_increase
-            
-            if tenant_share > capped_amount:
-                result['cam_cap_applied'] = True
                 result['calculations'].append({
-                    'step': f'CAM cap applied ({cap_percentage}%)',
-                    'formula': f'${base_amount:,.2f} + (${base_amount:,.2f} × {cap_percentage}%)',
-                    'result': capped_amount
+                    'step': 'CAM cap skipped',
+                    'formula': f'{cap_percentage}% cap is in the lease but no CAM Base Amount was stored',
+                    'result': tenant_share
                 })
-                tenant_share = capped_amount
+            else:
+                capped_amount = base_amount + (base_amount * (cap_percentage / 100))
+                if tenant_share > capped_amount:
+                    result['cam_cap_applied'] = True
+                    result['calculations'].append({
+                        'step': f'CAM cap applied ({cap_percentage}%)',
+                        'formula': f'${base_amount:,.2f} + (${base_amount:,.2f} × {cap_percentage}%)',
+                        'result': capped_amount
+                    })
+                    tenant_share = capped_amount
         
         result['calculated_tenant_share'] = round(tenant_share, 2)
         return result
+
+    @staticmethod
+    def reconcile_cam_charges(
+        landlord_total: float,
+        tenant_share_billed: float,
+        cam_provisions: Dict,
+        line_items: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """Tenant share after removing lease-excluded lines, then applying stop/cap."""
+        cam_provisions = cam_provisions or {}
+        landlord_total = CAMCalculationEngine._as_float(landlord_total, 0.0)
+        tenant_share_billed = CAMCalculationEngine._as_float(tenant_share_billed, 0.0)
+        analyzed = CAMCalculationEngine.analyze_line_items(line_items or [], cam_provisions)
+        excluded_building = round(sum(
+            item.get('amount') or 0 for item in analyzed if item.get('should_challenge')
+        ), 2)
+        allowable_building = max(0.0, round(landlord_total - excluded_building, 2))
+
+        calc = CAMCalculationEngine.calculate_tenant_share(allowable_building, cam_provisions)
+        calculated_share = calc['calculated_tenant_share']
+        variance = round(tenant_share_billed - calculated_share, 2)
+        steps = []
+        if excluded_building:
+            steps.append({
+                'step': 'Excluded costs removed from building total',
+                'formula': f'${landlord_total:,.2f} − ${excluded_building:,.2f}',
+                'result': allowable_building,
+            })
+        steps.extend(calc.get('calculations') or [])
+        calc['calculations'] = steps
+        calc['excluded_building_charges'] = excluded_building
+        calc['allowable_building_charges'] = allowable_building
+        calc['analyzed_line_items'] = analyzed
+        calc['landlord_tenant_share'] = tenant_share_billed
+        calc['variance_amount'] = variance
+        calc['calculated_tenant_share'] = calculated_share
+        return calc
+
+    @staticmethod
+    def enrich_provisions(provisions: Optional[Dict], extracted_fields: Optional[Dict] = None) -> Dict:
+        """Fill blank CAM terms from the lease abstract fields."""
+        merged = dict(provisions or {})
+        if extracted_fields:
+            from_fields = CAMProvisionExtractor.extract_cam_provisions(extracted_fields)
+            for key, value in from_fields.items():
+                current = merged.get(key)
+                empty = current in (None, '', [], False)
+                if empty and value not in (None, '', [], False):
+                    merged[key] = value
+        if CAMCalculationEngine._as_float(merged.get('cam_cap_percentage'), None):
+            merged['has_cam_cap'] = True
+        return merged
 
     @staticmethod
     def _as_float(value, default=0.0):
@@ -780,6 +858,23 @@ def defaults_from_parsed_statement(parsed: Dict) -> Dict:
 def calculate_cam_charges(total_charges: float, provisions: Dict) -> Dict:
     """Quick CAM calculation"""
     return CAMCalculationEngine.calculate_tenant_share(total_charges, provisions)
+
+
+def reconcile_cam_charges(
+    landlord_total: float,
+    tenant_share_billed: float,
+    provisions: Dict,
+    line_items: Optional[List[Dict]] = None,
+) -> Dict:
+    """Tenant CAM after exclusions, pro-rata, stop, and cap."""
+    return CAMCalculationEngine.reconcile_cam_charges(
+        landlord_total, tenant_share_billed, provisions, line_items
+    )
+
+
+def enrich_cam_provisions(provisions: Optional[Dict], extracted_fields: Optional[Dict] = None) -> Dict:
+    """Fill blank CAM terms from abstracted lease fields."""
+    return CAMCalculationEngine.enrich_provisions(provisions, extracted_fields)
 
 
 def analyze_line_items(line_items: List[Dict], cam_provisions: Dict) -> List[Dict]:

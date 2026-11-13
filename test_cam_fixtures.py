@@ -15,6 +15,8 @@ from cam_engine import (  # noqa: E402
     calculate_cam_charges,
     defaults_from_parsed_statement,
     detect_discrepancies,
+    enrich_cam_provisions,
+    reconcile_cam_charges,
 )
 from cam_gpt_extractor import extract_text_from_pdf  # noqa: E402
 
@@ -119,6 +121,40 @@ class EngineMathTests(unittest.TestCase):
         })
         self.assertEqual(result["calculated_tenant_share"], 0.0)
         self.assertFalse(result["cam_cap_applied"])
+
+    def test_missing_base_amount_does_not_cap_against_this_year(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": S.TENANT_PRORATA_SHARE,
+            "has_cam_cap": True,
+            "cam_cap_percentage": S.CAM_CAP_PERCENTAGE,
+            "cam_base_amount": None,
+        })
+        self.assertEqual(result["calculated_tenant_share"], S.TENANT_SHARE_BILLED)
+        self.assertFalse(result["cam_cap_applied"])
+
+    def test_reconcile_strips_exclusions_then_prorates(self):
+        parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))
+        result = reconcile_cam_charges(
+            S.BUILDING_TOTAL_CHARGES,
+            S.TENANT_SHARE_BILLED,
+            S.PROVISIONS_FOR_ENGINE,
+            parsed["line_items"],
+        )
+        self.assertEqual(result["excluded_building_charges"], 379000.00)
+        self.assertEqual(result["allowable_building_charges"], 821000.00)
+        self.assertEqual(result["calculated_tenant_share"], 102625.00)
+        self.assertEqual(result["variance_amount"], 47375.00)
+
+    def test_enrich_reads_annual_increase_cap_field_name(self):
+        merged = enrich_cam_provisions({}, {
+            "CAM Annual Increase Cap (%)": "5%",
+            "Premises Square Footage (RSF)": "12,500",
+            "Building Total Square Footage": "100,000",
+            "CAM Exclusions": "capital improvements, roof replacement, debt service",
+        })
+        self.assertTrue(merged["has_cam_cap"])
+        self.assertEqual(merged["cam_cap_percentage"], 5.0)
+        self.assertAlmostEqual(merged["tenant_prorata_share"], 0.125, places=4)
 
     def test_overcharge_is_critical(self):
         analysis = detect_discrepancies(
