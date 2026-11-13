@@ -98,6 +98,23 @@ def format_currency(amount):
         return "N/A"
     return f"${amount:,.2f}"
 
+def get_openai_api_key():
+    """Read OpenAI from Streamlit secrets or local config/.env. Never fail if secrets.toml is missing."""
+    try:
+        key = st.secrets["OPENAI_API_KEY"]
+        if key:
+            return key
+    except Exception:
+        pass
+    try:
+        import config as app_config
+        key = getattr(app_config, "OPENAI_API_KEY", None)
+        if key and not str(key).startswith("your-"):
+            return key
+    except Exception:
+        pass
+    return None
+
 def init_cam_form_state():
     """Create Step 2 widget keys before the inputs render."""
     today = datetime.now()
@@ -357,9 +374,9 @@ with tab2:
                             import openai
                             
                             # Get OpenAI API key
-                            api_key = st.secrets.get("OPENAI_API_KEY")
+                            api_key = get_openai_api_key()
                             if not api_key:
-                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to Streamlit secrets.")
+                                st.error("OpenAI API key not configured. Add OPENAI_API_KEY to .env or config.py.")
                             else:
                                 # Fetch lease text
                                 lease_res = sb.table("leases").select("*").eq("id", selected_lease_id).execute()
@@ -428,30 +445,25 @@ with tab2:
                         from cam_engine import assemble_cam_statement
                         import tempfile
                         
-                        api_key = st.secrets.get("OPENAI_API_KEY") if hasattr(st, "secrets") else None
-                        if not api_key:
-                            try:
-                                import config as app_config
-                                candidate = getattr(app_config, "OPENAI_API_KEY", None)
-                                if candidate and not str(candidate).startswith("your-"):
-                                    api_key = candidate
-                            except Exception:
-                                api_key = None
+                        api_key = get_openai_api_key()
                         
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                             tmp_file.write(uploaded_file.getvalue())
                             tmp_path = tmp_file.name
                         
                         statement_text = extract_text_from_pdf(tmp_path)
-                        import os
                         os.unlink(tmp_path)
                         
                         if not statement_text:
                             st.error("Failed to extract text from PDF")
                         else:
+                            parsed_data = None
                             if api_key:
-                                parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
-                            else:
+                                try:
+                                    parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
+                                except Exception:
+                                    parsed_data = None
+                            if not parsed_data or (parsed_data.get("error") and not parsed_data.get("line_items")):
                                 parsed_data = assemble_cam_statement(statement_text)
                             
                             if parsed_data.get('error') and not parsed_data.get('line_items'):
