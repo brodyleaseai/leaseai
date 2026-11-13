@@ -343,6 +343,7 @@ class CAMStatementParser:
     CATEGORY_SUFFIXES = [
         ('Capital improvements', 'CAPITAL_IMPROVEMENTS'),
         ('Structural repairs', 'STRUCTURAL_REPAIRS'),
+        ('Roof replacement', 'ROOF_REPLACEMENT'),
         ('Legal fees', 'LEGAL_FEES'),
         ('Debt service', 'DEBT_SERVICE'),
         ('Depreciation', 'DEPRECIATION'),

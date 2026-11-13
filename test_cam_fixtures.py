@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "cam"))
 
 import scenario as S  # noqa: E402
+import scenario_ironwood as IW  # noqa: E402
 from cam_engine import (  # noqa: E402
     analyze_line_items,
     assemble_cam_statement,
@@ -456,6 +457,115 @@ class CamReportEmailTests(unittest.TestCase):
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].get("type"), "application/pdf")
         self.assertTrue(str(attachments[0].get("filename", "")).endswith(".pdf"))
+
+
+class IronwoodFixtureFilesTests(unittest.TestCase):
+    def test_lease_pdf_exists(self):
+        self.assertTrue(IW.LEASE_PDF.is_file(), f"missing {IW.LEASE_PDF}")
+        self.assertTrue(IW.LEASE_PDF.read_bytes().startswith(b"%PDF"))
+
+    def test_statement_pdf_exists(self):
+        self.assertTrue(IW.STATEMENT_PDF.is_file(), f"missing {IW.STATEMENT_PDF}")
+        self.assertTrue(IW.STATEMENT_PDF.read_bytes().startswith(b"%PDF"))
+
+
+class IronwoodLeaseTextTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = _pdf_text(IW.LEASE_PDF)
+
+    def test_parties_and_cam_terms_are_selectable_text(self):
+        for needle in (
+            IW.LANDLORD_NAME,
+            IW.TENANT_NAME,
+            IW.PROPERTY_ADDRESS,
+            "8,000",
+            "40,000",
+            "20.00%",
+            "CAM Base Year",
+            "CAM Annual Increase Cap",
+            "four percent (4%)",
+            "CAM Exclusions",
+            "parking lot reconstruction",
+            "HVAC replacement",
+            "roof replacement",
+            "Tenant Audit Right",
+            "Triple Net (NNN)",
+            "Pinnacle Fresh",
+        ):
+            self.assertIn(needle, self.text, f"Ironwood lease PDF missing {needle!r}")
+        self.assertIn("SYNTHETIC TEST DOCUMENT", self.text)
+        self.assertNotIn("Cascade Analytics", self.text)
+        self.assertNotIn("The Meridian Tower", self.text)
+
+
+class IronwoodStatementTextTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = _pdf_text(IW.STATEMENT_PDF)
+
+    def test_totals_and_planted_exclusions_are_selectable_text(self):
+        for needle in (
+            IW.LANDLORD_NAME,
+            IW.TENANT_NAME,
+            "723,000.00",
+            "144,600.00",
+            "February 28, 2025",
+            "Parking lot reconstruction",
+            "Rooftop HVAC replacement",
+            "Roof replacement",
+            "Legal fees",
+            "$90,000.00",
+            "$75,000.00",
+            "$50,000.00",
+            "$8,000.00",
+        ):
+            self.assertIn(needle, self.text, f"Ironwood statement PDF missing {needle!r}")
+        self.assertNotIn("Depreciation expense", self.text)
+        self.assertNotIn("debt service", self.text.lower())
+        self.assertNotIn("Cascade Analytics", self.text)
+
+
+class IronwoodEngineMathTests(unittest.TestCase):
+    def test_building_totals(self):
+        self.assertEqual(IW.ALLOWABLE_BUILDING_CHARGES, 500000.00)
+        self.assertEqual(IW.EXCLUDED_BUILDING_CHARGES, 223000.00)
+        self.assertEqual(IW.BUILDING_TOTAL_CHARGES, 723000.00)
+        self.assertEqual(IW.TENANT_SHARE_BILLED, 144600.00)
+        self.assertEqual(IW.SHARE_AFTER_EXCLUSIONS, 100000.00)
+        self.assertEqual(IW.CAP_CEILING, 83200.00)
+        self.assertEqual(IW.CALCULATED_TENANT_SHARE, 83200.00)
+        self.assertEqual(IW.VARIANCE_OVERCHARGE, 61400.00)
+
+    def test_cap_binds_after_exclusions_are_stripped(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        result = reconcile_cam_charges(
+            IW.BUILDING_TOTAL_CHARGES,
+            IW.TENANT_SHARE_BILLED,
+            IW.PROVISIONS_FOR_ENGINE,
+            parsed["line_items"],
+        )
+        self.assertEqual(len(parsed["line_items"]), 20)
+        self.assertEqual(result["excluded_building_charges"], 223000.00)
+        self.assertEqual(result["allowable_building_charges"], 500000.00)
+        self.assertEqual(result["calculated_tenant_share"], 83200.00)
+        self.assertEqual(result["variance_amount"], 61400.00)
+        self.assertTrue(result["cam_cap_applied"])
+
+    def test_four_planted_exclusions_are_challenged(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        analyzed = analyze_line_items(parsed["line_items"], IW.PROVISIONS_FOR_ENGINE)
+        challenged = [item for item in analyzed if item["should_challenge"]]
+        self.assertEqual(len(challenged), 4)
+        self.assertEqual(sum(item["variance"] for item in challenged), 223000.00)
+
+    def test_step_two_defaults_match_the_statement(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        defaults = defaults_from_parsed_statement(parsed)
+        self.assertEqual(defaults["recon_year"], 2024)
+        self.assertEqual(defaults["statement_date"].isoformat(), "2025-02-28")
+        self.assertEqual(defaults["landlord_total"], 723000.00)
+        self.assertEqual(defaults["tenant_share_billed"], 144600.00)
 
 
 if __name__ == "__main__":
