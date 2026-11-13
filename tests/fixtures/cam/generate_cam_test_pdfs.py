@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the synthetic Northridge lease and 2025 CAM statement PDFs."""
+"""Generate the synthetic CAM lease + statement PDF pairs."""
 
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ from reportlab.platypus import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import scenario as S  # noqa: E402
+import scenario  # noqa: E402
+import scenario_ironwood  # noqa: E402
 
 
 NAVY = colors.HexColor("#1a365d")
@@ -156,6 +157,7 @@ def _category_label(category: str) -> str:
         "MAINTENANCE": "Maintenance",
         "CAPITAL_IMPROVEMENTS": "Capital improvements",
         "STRUCTURAL_REPAIRS": "Structural repairs",
+        "ROOF_REPLACEMENT": "Roof replacement",
         "LEGAL_FEES": "Legal fees",
         "DEPRECIATION": "Depreciation",
         "DEBT_SERVICE": "Debt service",
@@ -201,8 +203,79 @@ def _footer(canvas, doc, footer_text: str):
     canvas.restoreState()
 
 
-def build_lease(output_path: Path) -> None:
+DEFAULT_BASE_RENT_CLAUSES = [
+    "4.1 Base Rent Schedule. Base Rent is calculated at Forty-Two and 00/100 "
+    "Dollars ($42.00) per rentable square foot per year for Year 1, with a "
+    "fixed three percent (3%) Annual Escalation Type (Fixed / CPI / Percentage) "
+    "and Annual Escalation Rate or Cap of 3%. CPI Index Used: not applicable. "
+    "Percentage Rent Clause: none. Gross Revenue Breakpoint: not applicable.",
+    "Base Rent Year 1 (monthly): $43,750.00. "
+    "Base Rent Year 2 (monthly): $45,062.50. "
+    "Base Rent Year 3 (monthly): $46,414.38. "
+    "Base Rent Year 4 (monthly): $47,806.81. "
+    "Base Rent Year 5 (monthly): $49,241.01. "
+    "Full Rent Schedule (all years): Year 1 $525,000.00; Year 2 $540,750.00; "
+    "Year 3 $556,972.50; Year 4 $573,681.68; Year 5 $590,892.13.",
+]
+
+DEFAULT_SECURITY_CLAUSES = [
+    "5.1 Security Deposit Amount: $87,500.00 (two months of Year 1 Base Rent). "
+    "Security Deposit — Letter of Credit: not required. "
+    "Security Deposit Reduction Schedule: none.",
+    "5.2 Parking — Number of Stalls: 25 unreserved stalls. "
+    "Parking — Monthly Cost per Stall: $150.00. Storage Space Included: none. "
+    "Signage Rights: Tenant may place suite-entry signage; no exterior building "
+    "signage without Landlord’s prior written consent. "
+    "Roof / Exterior Access Rights: none except as required for Tenant’s "
+    "permitted telecommunications equipment, subject to Landlord approval.",
+]
+
+DEFAULT_USE_CLAUSES = [
+    "6.1 Permitted Use: general office use for a software analytics company "
+    "and uses incidental thereto. Prohibited Uses / Exclusivity Clause: "
+    "no retail, medical clinic, or industrial use. Co-Tenancy Clause: none.",
+    "6.2 Subletting / Assignment Rights: Tenant may assign or sublet with "
+    "Landlord’s prior written consent, not to be unreasonably withheld. "
+    "Subletting — Landlord Consent Required: Yes.",
+    "6.3 Tenant Improvement Allowance (TIA): $40.00 per RSF, equal to "
+    "$500,000.00. TIA Conditions / Milestones: paid upon substantial "
+    "completion of Tenant’s initial improvements and delivery of lien waivers. "
+    "Alterations — Landlord Consent Threshold: any alteration exceeding "
+    "$25,000.00 requires Landlord consent. "
+    "ADA / Accessibility Compliance Responsibility: Landlord as to the "
+    "Building common areas; Tenant as to the Premises.",
+]
+
+DEFAULT_TAX_CLAUSES = [
+    "8.1 Property Tax Responsibility: included in Operating Expenses except "
+    "to the extent listed as a CAM Exclusion. Property Insurance "
+    "Responsibility: Landlord carries building insurance, included in "
+    "Operating Expenses. Tenant Insurance Requirements: commercial general "
+    "liability and property insurance covering Tenant’s contents. "
+    "Tenant Liability Insurance Minimum: $2,000,000 per occurrence.",
+    "8.2 Utilities Responsibility: Tenant pays electricity serving the "
+    "Premises directly; common-area utilities are CAM. HVAC Responsibility "
+    "(Landlord / Tenant): Landlord. HVAC Maintenance Obligation: Landlord, "
+    "as a CAM expense for routine maintenance. Janitorial Responsibility: "
+    "Landlord for common areas (CAM); Tenant for the Premises. "
+    "Structural / Roof Repair Responsibility: Landlord, and such costs are "
+    "CAM Exclusions (not pass-through).",
+]
+
+DEFAULT_RENEWAL_CLAUSES = [
+    "9.1 Number of Renewal Options: two (2). Renewal Option Term Length: "
+    "five (5) years each. Renewal Notice Deadline: twelve (12) months prior "
+    "to the then-current expiration. Renewal Rent Basis (FMV / Fixed / CPI): "
+    "Fair Market Value (FMV). Right of First Refusal: none. Right of First "
+    "Offer: none. Expansion Option: none. Contraction / Reduction Option: none.",
+    "9.2 Early Termination Right: none. Termination Notice Period: not "
+    "applicable. Early Termination Fee / Penalty: not applicable.",
+]
+
+
+def build_lease(output_path: Path, S) -> None:
     styles = _styles()
+    doc_kind = getattr(S, "DOC_KIND", "OFFICE LEASE AGREEMENT")
     doc = SimpleDocTemplate(
         str(output_path),
         pagesize=letter,
@@ -210,7 +283,7 @@ def build_lease(output_path: Path) -> None:
         rightMargin=0.75 * inch,
         topMargin=0.7 * inch,
         bottomMargin=0.7 * inch,
-        title="Office Lease — The Meridian Tower (Synthetic Test)",
+        title=f"{doc_kind} — {S.PROPERTY_NAME} (Synthetic Test)",
         author="LeaseAI test fixtures",
     )
     story = []
@@ -219,13 +292,13 @@ def build_lease(output_path: Path) -> None:
         "SYNTHETIC TEST DOCUMENT  ·  FICTIONAL PARTIES  ·  FOR LEASEAI CAM TESTING ONLY",
     ))
     story.append(Spacer(1, 14))
-    story.append(Paragraph("OFFICE LEASE AGREEMENT", styles["DocTitle"]))
+    story.append(Paragraph(_escape(doc_kind), styles["DocTitle"]))
     story.append(Paragraph(S.PROPERTY_NAME, styles["DocSub"]))
     story.append(Paragraph(_escape(S.PROPERTY_ADDRESS), styles["CenterSmall"]))
     story.append(Paragraph(f"{S.SUITE}, Floor {S.FLOOR}", styles["CenterSmall"]))
     story.append(Spacer(1, 8))
     story.append(Paragraph(
-        f"This Office Lease Agreement (the “Lease”) is entered into as of "
+        f"This {doc_kind.title()} (the “Lease”) is entered into as of "
         f"{S.COMMENCEMENT_DATE} by and between <b>{_escape(S.LANDLORD_NAME)}</b> "
         f"(“Landlord”) and <b>{_escape(S.TENANT_NAME)}</b>, doing business as "
         f"{_escape(S.TENANT_TRADE_NAME)} (“Tenant”).",
@@ -262,9 +335,8 @@ def build_lease(output_path: Path) -> None:
         (
             "ARTICLE 3 — TERM",
             [
-                f"3.1 Lease Type. This is a {S.LEASE_TYPE} lease. Net Lease Type: not a "
-                f"triple-net lease; Tenant pays Base Rent plus Tenant’s pro-rata share of "
-                f"CAM / Operating Cost Charges as provided in Article 7.",
+                f"3.1 Lease Type. This is a {S.LEASE_TYPE} lease. "
+                f"{getattr(S, 'LEASE_TYPE_DETAIL', '')}".strip(),
                 f"3.2 Dates. Lease Commencement Date: {S.COMMENCEMENT_DATE}. "
                 f"Rent Commencement Date: {S.RENT_COMMENCEMENT_DATE}. "
                 f"Lease Expiration Date: {S.EXPIRATION_DATE}. "
@@ -274,52 +346,15 @@ def build_lease(output_path: Path) -> None:
         ),
         (
             "ARTICLE 4 — BASE RENT",
-            [
-                "4.1 Base Rent Schedule. Base Rent is calculated at Forty-Two and 00/100 "
-                "Dollars ($42.00) per rentable square foot per year for Year 1, with a "
-                "fixed three percent (3%) Annual Escalation Type (Fixed / CPI / Percentage) "
-                "and Annual Escalation Rate or Cap of 3%. CPI Index Used: not applicable. "
-                "Percentage Rent Clause: none. Gross Revenue Breakpoint: not applicable.",
-                "Base Rent Year 1 (monthly): $43,750.00. "
-                "Base Rent Year 2 (monthly): $45,062.50. "
-                "Base Rent Year 3 (monthly): $46,414.38. "
-                "Base Rent Year 4 (monthly): $47,806.81. "
-                "Base Rent Year 5 (monthly): $49,241.01. "
-                "Full Rent Schedule (all years): Year 1 $525,000.00; Year 2 $540,750.00; "
-                "Year 3 $556,972.50; Year 4 $573,681.68; Year 5 $590,892.13.",
-            ],
+            getattr(S, "BASE_RENT_CLAUSES", DEFAULT_BASE_RENT_CLAUSES),
         ),
         (
             "ARTICLE 5 — SECURITY DEPOSIT AND PARKING",
-            [
-                "5.1 Security Deposit Amount: $87,500.00 (two months of Year 1 Base Rent). "
-                "Security Deposit — Letter of Credit: not required. "
-                "Security Deposit Reduction Schedule: none.",
-                "5.2 Parking — Number of Stalls: 25 unreserved stalls. "
-                "Parking — Monthly Cost per Stall: $150.00. Storage Space Included: none. "
-                "Signage Rights: Tenant may place suite-entry signage; no exterior building "
-                "signage without Landlord’s prior written consent. "
-                "Roof / Exterior Access Rights: none except as required for Tenant’s "
-                "permitted telecommunications equipment, subject to Landlord approval.",
-            ],
+            getattr(S, "SECURITY_CLAUSES", DEFAULT_SECURITY_CLAUSES),
         ),
         (
             "ARTICLE 6 — USE, ASSIGNMENT, AND IMPROVEMENTS",
-            [
-                "6.1 Permitted Use: general office use for a software analytics company "
-                "and uses incidental thereto. Prohibited Uses / Exclusivity Clause: "
-                "no retail, medical clinic, or industrial use. Co-Tenancy Clause: none.",
-                "6.2 Subletting / Assignment Rights: Tenant may assign or sublet with "
-                "Landlord’s prior written consent, not to be unreasonably withheld. "
-                "Subletting — Landlord Consent Required: Yes.",
-                "6.3 Tenant Improvement Allowance (TIA): $40.00 per RSF, equal to "
-                "$500,000.00. TIA Conditions / Milestones: paid upon substantial "
-                "completion of Tenant’s initial improvements and delivery of lien waivers. "
-                "Alterations — Landlord Consent Threshold: any alteration exceeding "
-                "$25,000.00 requires Landlord consent. "
-                "ADA / Accessibility Compliance Responsibility: Landlord as to the "
-                "Building common areas; Tenant as to the Premises.",
-            ],
+            getattr(S, "USE_CLAUSES", DEFAULT_USE_CLAUSES),
         ),
         (
             "ARTICLE 7 — OPERATING EXPENSES AND CAM / OPERATING COST CHARGES",
@@ -337,17 +372,12 @@ def build_lease(output_path: Path) -> None:
                 f"{S.CAM_BASE_YEAR} is {S.money(S.CAM_BASE_AMOUNT)}.",
                 f"7.4 CAM Annual Increase Cap (%). Tenant’s CAM / Operating Cost Charges "
                 f"for any calendar year after the Base Year are subject to a CAM Annual "
-                f"Increase Cap (%) / CAM Escalation Cap of five percent (5%) of the CAM "
+                f"Increase Cap (%) / CAM Escalation Cap of {S.CAM_CAP_PERCENTAGE_WORDS} of the CAM "
                 f"Base Amount. The CAM cap percentage is {S.CAM_CAP_PERCENTAGE:.1f}%. "
                 f"The maximum Tenant CAM charge in any year is therefore "
-                f"{S.money(S.CALCULATED_TENANT_SHARE)} (being the CAM Base Amount of "
-                f"{S.money(S.CAM_BASE_AMOUNT)} plus 5%). Has CAM Cap: Yes.",
-                "7.5 CAM Exclusions. Operating Expenses shall exclude, and Landlord shall "
-                "not pass through, the following CAM Exclusions: capital improvements; "
-                "structural repairs; roof replacement; depreciation; debt service; "
-                "mortgage payments; and legal fees relating to other tenants or to "
-                "Landlord’s financing. Capital improvements and structural repairs "
-                "(including roof replacement) are Landlord’s sole cost.",
+                f"{S.money(S.CAP_CEILING)} (being the CAM Base Amount of "
+                f"{S.money(S.CAM_BASE_AMOUNT)} plus {S.CAM_CAP_PERCENTAGE:.0f}%). Has CAM Cap: Yes.",
+                f"7.5 CAM Exclusions. {S.CAM_EXCLUSIONS_CLAUSE}",
                 f"7.6 Payment and Reconciliation. CAM Payment Frequency: {S.CAM_PAYMENT_FREQUENCY}. "
                 f"Tenant shall pay estimated CAM monthly together with Base Rent. "
                 f"Landlord shall deliver an annual CAM reconciliation statement "
@@ -359,33 +389,11 @@ def build_lease(output_path: Path) -> None:
         ),
         (
             "ARTICLE 8 — TAXES, INSURANCE, UTILITIES, AND MAINTENANCE",
-            [
-                "8.1 Property Tax Responsibility: included in Operating Expenses except "
-                "to the extent listed as a CAM Exclusion. Property Insurance "
-                "Responsibility: Landlord carries building insurance, included in "
-                "Operating Expenses. Tenant Insurance Requirements: commercial general "
-                "liability and property insurance covering Tenant’s contents. "
-                "Tenant Liability Insurance Minimum: $2,000,000 per occurrence.",
-                "8.2 Utilities Responsibility: Tenant pays electricity serving the "
-                "Premises directly; common-area utilities are CAM. HVAC Responsibility "
-                "(Landlord / Tenant): Landlord. HVAC Maintenance Obligation: Landlord, "
-                "as a CAM expense for routine maintenance. Janitorial Responsibility: "
-                "Landlord for common areas (CAM); Tenant for the Premises. "
-                "Structural / Roof Repair Responsibility: Landlord, and such costs are "
-                "CAM Exclusions (not pass-through).",
-            ],
+            getattr(S, "TAX_CLAUSES", DEFAULT_TAX_CLAUSES),
         ),
         (
             "ARTICLE 9 — RENEWAL, EXPANSION, AND TERMINATION",
-            [
-                "9.1 Number of Renewal Options: two (2). Renewal Option Term Length: "
-                "five (5) years each. Renewal Notice Deadline: twelve (12) months prior "
-                "to the then-current expiration. Renewal Rent Basis (FMV / Fixed / CPI): "
-                "Fair Market Value (FMV). Right of First Refusal: none. Right of First "
-                "Offer: none. Expansion Option: none. Contraction / Reduction Option: none.",
-                "9.2 Early Termination Right: none. Termination Notice Period: not "
-                "applicable. Early Termination Fee / Penalty: not applicable.",
-            ],
+            getattr(S, "RENEWAL_CLAUSES", DEFAULT_RENEWAL_CLAUSES),
         ),
         (
             "ARTICLE 10 — LEGAL AND COMPLIANCE",
@@ -398,7 +406,7 @@ def build_lease(output_path: Path) -> None:
                 f"within fifteen (15) days after request.",
                 "10.2 Force Majeure Clause: neither party is liable for delay caused by "
                 "events beyond its reasonable control. Dispute Resolution Mechanism: "
-                "state court in Multnomah County, Oregon; mediation required before "
+                f"state court in {S.DISPUTE_VENUE}; mediation required before "
                 "litigation. Holdover Provision (rate & notice): 150% of then-current "
                 "Base Rent, month-to-month. Demolition / Redevelopment Clause: none.",
                 "10.3 Default Cure Period (Tenant): ten (10) days for monetary default; "
@@ -423,11 +431,11 @@ def build_lease(output_path: Path) -> None:
         [
             Paragraph(f"<b>LANDLORD</b><br/>{_escape(S.LANDLORD_NAME)}<br/><br/>"
                       f"By: ___________________________<br/>"
-                      f"Name: Elena Voss, Managing Partner<br/>"
+                      f"Name: {_escape(S.LANDLORD_SIGNER)}<br/>"
                       f"Date: {S.COMMENCEMENT_DATE}", styles["BodyLeft"]),
             Paragraph(f"<b>TENANT</b><br/>{_escape(S.TENANT_NAME)}<br/><br/>"
                       f"By: ___________________________<br/>"
-                      f"Name: Marcus Hale, Chief Financial Officer<br/>"
+                      f"Name: {_escape(S.TENANT_SIGNER)}<br/>"
                       f"Date: {S.COMMENCEMENT_DATE}", styles["BodyLeft"]),
         ]
     ]
@@ -446,17 +454,17 @@ def build_lease(output_path: Path) -> None:
     )
 
 
-def _line_row(styles, number, description, category, amount, flag=False):
+def _line_row(styles, scenario_mod, number, description, category, amount, flag=False):
     color_style = "FlagNote" if flag else "TableCell"
     return [
         Paragraph(str(number), styles["TableCell"]),
         Paragraph(_escape(description), styles[color_style] if flag else styles["TableCell"]),
         Paragraph(_category_label(category), styles["TableCell"]),
-        Paragraph(S.money(amount), styles["MoneyRight"]),
+        Paragraph(scenario_mod.money(amount), styles["MoneyRight"]),
     ]
 
 
-def build_statement(output_path: Path) -> None:
+def build_statement(output_path: Path, S) -> None:
     styles = _styles()
     doc = SimpleDocTemplate(
         str(output_path),
@@ -465,7 +473,7 @@ def build_statement(output_path: Path) -> None:
         rightMargin=0.65 * inch,
         topMargin=0.65 * inch,
         bottomMargin=0.7 * inch,
-        title="2025 Annual CAM Reconciliation Statement (Synthetic Test)",
+        title=f"{S.RECONCILIATION_YEAR} Annual CAM Reconciliation Statement (Synthetic Test)",
         author="LeaseAI test fixtures",
     )
     story = []
@@ -539,10 +547,10 @@ def build_statement(output_path: Path) -> None:
     rows = [header]
     line_no = 1
     for description, category, amount in S.ALLOWABLE_LINE_ITEMS:
-        rows.append(_line_row(styles, line_no, description, category, amount, flag=False))
+        rows.append(_line_row(styles, S, line_no, description, category, amount, flag=False))
         line_no += 1
     for description, category, amount in S.EXCLUDED_LINE_ITEMS:
-        rows.append(_line_row(styles, line_no, description, category, amount, flag=True))
+        rows.append(_line_row(styles, S, line_no, description, category, amount, flag=True))
         line_no += 1
 
     rows.append([
@@ -589,8 +597,11 @@ def build_statement(output_path: Path) -> None:
             styles["TableCell"],
         ),
          Paragraph(S.money(S.TENANT_SHARE_BILLED), styles["MoneyRight"])],
-        [Paragraph(f"Less: estimated CAM paid in {S.RECONCILIATION_YEAR} ($9,000.00 × 12)",
-                   styles["TableCell"]),
+        [Paragraph(
+            f"Less: estimated CAM paid in {S.RECONCILIATION_YEAR} "
+            f"({S.money(S.ESTIMATED_MONTHLY)} × 12)",
+            styles["TableCell"],
+        ),
          Paragraph(S.money(S.ESTIMATED_CAM_PAID), styles["MoneyRight"])],
         [Paragraph("<b>Balance Due from Tenant</b>", styles["TableCell"]),
          Paragraph(f"<b>{S.money(S.BALANCE_DUE_BILLED)}</b>", styles["MoneyRight"])],
@@ -610,11 +621,12 @@ def build_statement(output_path: Path) -> None:
     story.append(Spacer(1, 10))
     story.append(Paragraph(
         "Please remit the balance due within thirty (30) days of the statement date. "
-        "Questions may be directed to CAM Accounting at Northridge Office Partners, LLC.",
+        f"Questions may be directed to CAM Accounting at {_escape(S.LANDLORD_NAME)}.",
         styles["Clause"],
     ))
     story.append(Paragraph(
-        "Sincerely,<br/><br/>Priya Nandakumar<br/>Director of Accounting<br/>"
+        f"Sincerely,<br/><br/>{_escape(S.ACCOUNTING_SIGNER)}<br/>"
+        f"{_escape(S.ACCOUNTING_TITLE)}<br/>"
         f"{_escape(S.LANDLORD_NAME)}",
         styles["BodyLeft"],
     ))
@@ -627,16 +639,17 @@ def build_statement(output_path: Path) -> None:
 
 
 def main() -> None:
-    S.FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-    build_lease(S.LEASE_PDF)
-    build_statement(S.STATEMENT_PDF)
-    print(f"Wrote {S.LEASE_PDF}")
-    print(f"Wrote {S.STATEMENT_PDF}")
-    print(
-        f"Expected: billed {S.money(S.TENANT_SHARE_BILLED)} vs "
-        f"calculated {S.money(S.CALCULATED_TENANT_SHARE)} "
-        f"({S.money(S.VARIANCE_OVERCHARGE)} overcharge)"
-    )
+    for S in (scenario, scenario_ironwood):
+        S.FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+        build_lease(S.LEASE_PDF, S)
+        build_statement(S.STATEMENT_PDF, S)
+        print(f"Wrote {S.LEASE_PDF}")
+        print(f"Wrote {S.STATEMENT_PDF}")
+        print(
+            f"Expected: billed {S.money(S.TENANT_SHARE_BILLED)} vs "
+            f"calculated {S.money(S.CALCULATED_TENANT_SHARE)} "
+            f"({S.money(S.VARIANCE_OVERCHARGE)} overcharge)"
+        )
 
 
 if __name__ == "__main__":

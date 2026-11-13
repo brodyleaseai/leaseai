@@ -43,12 +43,33 @@ EXPIRATION_DATE = "December 31, 2027"
 TERM_MONTHS = 60
 LEASE_TYPE = "Modified Gross"
 GOVERNING_LAW = "State of Oregon"
+DISPUTE_VENUE = "Multnomah County, Oregon"
+CAM_CAP_PERCENTAGE_WORDS = "five percent (5%)"
+PERMITTED_USE = "general office use for a software analytics company and uses incidental thereto"
+LANDLORD_SIGNER = "Elena Voss, Managing Partner"
+TENANT_SIGNER = "Marcus Hale, Chief Financial Officer"
+ACCOUNTING_SIGNER = "Priya Nandakumar"
+ACCOUNTING_TITLE = "Director of Accounting"
+DOC_KIND = "OFFICE LEASE AGREEMENT"
+ESTIMATED_MONTHLY = 9000.00
 
 # CAM terms that the reconciliation engine actually uses
 CAM_BASE_YEAR = 2023
 CAM_BASE_AMOUNT = 100000.00  # tenant share in the base year
 CAM_CAP_PERCENTAGE = 5.0
+CAP_CEILING = round(CAM_BASE_AMOUNT * (1 + CAM_CAP_PERCENTAGE / 100.0), 2)
 HAS_CAM_CAP = True
+LEASE_TYPE_DETAIL = (
+    "Net Lease Type: not a triple-net lease; Tenant pays Base Rent plus Tenant's "
+    "pro-rata share of CAM / Operating Cost Charges as provided in Article 7."
+)
+CAM_EXCLUSIONS_CLAUSE = (
+    "Operating Expenses shall exclude, and Landlord shall not pass through, the following "
+    "CAM Exclusions: capital improvements; structural repairs; roof replacement; "
+    "depreciation; debt service; mortgage payments; and legal fees relating to other "
+    "tenants or to Landlord's financing. Capital improvements and structural repairs "
+    "(including roof replacement) are Landlord's sole cost."
+)
 # No CAM stop: cam_engine currently replaces the share with the overage
 # when a stop is set, which would confuse this test.
 CAM_STOP_AMOUNT = None
