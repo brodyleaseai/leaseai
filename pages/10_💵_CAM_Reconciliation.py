@@ -227,7 +227,7 @@ def build_cam_report(results):
         )
     if not lease_data.get("property_address"):
         lease_data["property_address"] = fields.get("Property Address")
-    provisions = results.get("provisions_used") or cam_prov
+    provisions = enrich_cam_provisions(results.get("provisions_used") or cam_prov, fields)
     line_items = report_line_items(results, provisions)
     recon_data = {
         "reconciliation_year": results["recon_year"],

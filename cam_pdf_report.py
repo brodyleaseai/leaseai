@@ -94,7 +94,50 @@ def _as_float(value, default=0.0):
 
 def _category_label(category: Optional[str]) -> str:
     raw = (category or "OTHER").strip()
-    return CATEGORY_LABELS.get(raw.upper(), raw.replace("_", " ").title())
+    mapped = CATEGORY_LABELS.get(raw.upper().replace(" ", "_"))
+    if mapped:
+        return mapped
+    return raw.replace("_", " ")
+
+
+def _exclusion_display(provisions: Dict) -> List[str]:
+    """Lease exclusion language for page 4 — one list, original casing."""
+    description = (provisions.get("exclusions_description") or "").strip()
+    if description:
+        parts = [part.strip(" \t•-") for part in description.split(",") if part.strip(" \t•-")]
+        return parts or [description]
+    labels = []
+    seen = set()
+    for item in provisions.get("excluded_items") or []:
+        label = _category_label(str(item))
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
+    return labels
+
+
+def _audit_right_label(provisions: Dict) -> str:
+    if provisions.get("tenant_audit_right") is True:
+        return "Yes"
+    if provisions.get("tenant_audit_right") is False:
+        return "Not specified" if not provisions.get("audit_deadline") else "No"
+    return "Not specified"
+
+
+def _cap_label(provisions: Dict) -> str:
+    cap = provisions.get("cam_cap_percentage")
+    has_cap = bool(provisions.get("has_cam_cap") or cap)
+    if not has_cap:
+        return "No annual increase cap stored"
+    cap_display = f"{cap:g}%" if cap not in (None, "") else "yes"
+    base = provisions.get("cam_base_amount")
+    if base:
+        return f"Yes — {cap_display} annual increase, measured from CAM Base Amount {_money(base)}"
+    return (
+        f"Yes — {cap_display} in the lease; not applied because CAM Base Amount was not stored"
+    )
 
 
 def _share_pct(share) -> str:
@@ -459,10 +502,16 @@ class CAMReconciliationPDFReport:
                 "The annual increase cap binds after exclusions and reduces the tenant share further."
             )
         elif cam_provisions.get("has_cam_cap") or cam_provisions.get("cam_cap_percentage"):
-            findings.append(
-                "The annual increase cap was tested against the CAM Base Amount and does not bind "
-                "after excluded costs are removed."
-            )
+            if cam_provisions.get("cam_base_amount"):
+                findings.append(
+                    "The annual increase cap was tested against the CAM Base Amount and does not bind "
+                    "after excluded costs are removed."
+                )
+            else:
+                findings.append(
+                    "The lease has an annual increase cap, but it was not applied because "
+                    "CAM Base Amount was not stored."
+                )
         elements.append(Paragraph("KEY FINDINGS", self.styles["SectionHead"]))
         for finding in findings:
             elements.append(Paragraph(f"- {finding}", self.styles["BodyNormal"]))
@@ -619,19 +668,20 @@ class CAMReconciliationPDFReport:
         provisions = cam_provisions or {}
         tenant_sf = _sf(provisions.get("tenant_square_footage"))
         building_sf = _sf(provisions.get("building_square_footage"))
-        cap = provisions.get("cam_cap_percentage")
-        if provisions.get("has_cam_cap") or cap:
-            cap_text = f"Yes — {cap}% annual increase, measured from CAM Base Amount"
-        else:
-            cap_text = "No annual increase cap stored"
         terms = [
             self._kv("CAM Base Year", provisions.get("cam_base_year") or "Not specified"),
-            self._kv("CAM Base Amount (tenant share)", _money(provisions.get("cam_base_amount")) if provisions.get("cam_base_amount") else "Not specified"),
+            self._kv(
+                "CAM Base Amount (tenant share)",
+                _money(provisions.get("cam_base_amount")) if provisions.get("cam_base_amount") else "Not specified",
+            ),
             self._kv("Tenant pro-rata share", _share_pct(provisions.get("tenant_prorata_share"))),
             self._kv("Premises / building RSF", f"{tenant_sf} / {building_sf}"),
-            self._kv("CAM cap", cap_text),
-            self._kv("CAM stop", _money(provisions.get("cam_stop_amount")) if provisions.get("cam_stop_amount") else "None"),
-            self._kv("Tenant audit right", "Yes" if provisions.get("tenant_audit_right") else "Not specified"),
+            self._kv("CAM cap", _cap_label(provisions)),
+            self._kv(
+                "CAM stop",
+                _money(provisions.get("cam_stop_amount")) if provisions.get("cam_stop_amount") else "None",
+            ),
+            self._kv("Tenant audit right", _audit_right_label(provisions)),
             self._kv("Audit deadline", provisions.get("audit_deadline") or "Not specified"),
         ]
         table = Table(terms, colWidths=[2.3 * inch, 4.4 * inch])
@@ -646,24 +696,23 @@ class CAMReconciliationPDFReport:
         elements = [
             Paragraph("LEASE TERMS APPLIED", self.styles["SectionHead"]),
             Paragraph(
-                "These are the CAM terms LeaseAI used. If any field is blank, the workpaper "
-                "did not invent a substitute except deriving share from RSF when the percentage "
-                "was missing.",
+                "These are the CAM terms LeaseAI used. Blank fields were not stored on the "
+                "lease abstract; the workpaper does not invent them, except deriving share "
+                "from RSF when the percentage was missing.",
                 self.styles["BodyNormal"],
             ),
             Spacer(1, 0.06 * inch),
             table,
         ]
-        excluded = provisions.get("excluded_items") or []
-        if excluded or provisions.get("exclusions_description"):
+        exclusion_lines = _exclusion_display(provisions)
+        if exclusion_lines:
             elements.append(Paragraph("EXCLUSIONS IN THE LEASE", self.styles["SectionHead"]))
-            if provisions.get("exclusions_description"):
-                elements.append(Paragraph(_xml(provisions["exclusions_description"]), self.styles["BodyNormal"]))
-            for item in excluded:
-                elements.append(Paragraph(
-                    f"- {_xml(_category_label(str(item)))}",
-                    self.styles["BodyNormal"],
-                ))
+            elements.append(Paragraph(
+                "Costs the lease removes from the CAM pool before the tenant share is calculated:",
+                self.styles["BodyNormal"],
+            ))
+            for item in exclusion_lines:
+                elements.append(Paragraph(f"- {_xml(item)}", self.styles["BodyNormal"]))
         return elements
 
     def _create_disclaimer(self) -> List:

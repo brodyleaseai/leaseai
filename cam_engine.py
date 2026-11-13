@@ -109,14 +109,49 @@ class CAMProvisionExtractor:
                 provisions['exclusions_description'] = exclusions_text
                 provisions['excluded_items'] = CAMProvisionExtractor._parse_exclusions(exclusions_text)
         
-        # Extract tenant audit rights
-        if 'Tenant Audit Right' in extracted_fields:
-            audit_text = str(extracted_fields.get('Tenant Audit Right', '')).upper()
-            provisions['tenant_audit_right'] = 'YES' in audit_text or 'ALLOWED' in audit_text
+        # Extract tenant audit rights (prompt versions use Right and Rights)
+        for audit_field in ('Tenant Audit Right', 'Tenant Audit Rights'):
+            if audit_field not in extracted_fields:
+                continue
+            audit_text = CAMProvisionExtractor._field_text(extracted_fields.get(audit_field)).upper()
+            if not audit_text or 'NOT FOUND' in audit_text:
+                continue
+            provisions['tenant_audit_right'] = (
+                'YES' in audit_text or 'ALLOWED' in audit_text or audit_text == 'TRUE'
+            )
+            break
+
+        for deadline_field in (
+            'Audit Deadline',
+            'CAM Audit Deadline',
+            'Tenant Audit Deadline',
+        ):
+            if deadline_field not in extracted_fields:
+                continue
+            deadline = CAMProvisionExtractor._field_text(extracted_fields.get(deadline_field))
+            if deadline and 'NOT FOUND' not in deadline.upper() and deadline.upper() != 'N/A':
+                provisions['audit_deadline'] = deadline
+                break
+        if not provisions.get('audit_deadline'):
+            for key, raw in extracted_fields.items():
+                if 'AUDIT DEADLINE' not in str(key).upper():
+                    continue
+                deadline = CAMProvisionExtractor._field_text(raw)
+                if deadline and 'NOT FOUND' not in deadline.upper():
+                    provisions['audit_deadline'] = deadline
+                    break
 
         if not provisions.get('cam_base_amount'):
+            for amount_field in ('CAM Base Amount', 'CAM Base Amount (tenant share)'):
+                if amount_field not in extracted_fields:
+                    continue
+                amount = CAMProvisionExtractor._extract_currency(extracted_fields.get(amount_field))
+                if amount:
+                    provisions['cam_base_amount'] = amount
+                    break
+        if not provisions.get('cam_base_amount'):
             for key, raw in extracted_fields.items():
-                blob = str(raw.get('value') if isinstance(raw, dict) else raw)
+                blob = CAMProvisionExtractor._field_text(raw)
                 if 'CAM BASE AMOUNT' in f"{key} {blob}".upper():
                     amount = CAMProvisionExtractor._extract_currency(blob)
                     if amount:
@@ -124,6 +159,17 @@ class CAMProvisionExtractor:
                         break
         
         return provisions
+
+    @staticmethod
+    def _field_text(value) -> str:
+        if isinstance(value, dict):
+            value = (
+                value.get('reviewed_value')
+                or value.get('raw_value')
+                or value.get('value')
+                or ''
+            )
+        return str(value or '').strip()
     
     @staticmethod
     def _extract_currency(value) -> Optional[float]:
@@ -132,11 +178,22 @@ class CAMProvisionExtractor:
             value = value.get('value', '')
         
         value_str = str(value)
-        # Remove currency symbols, commas, and extract number
+        match = re.search(r'\$\s*([\d,]+(?:\.\d{1,2})?)', value_str)
+        if match:
+            try:
+                return float(match.group(1).replace(',', ''))
+            except ValueError:
+                return None
+        match = re.search(r'\b(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?)\b', value_str)
+        if match:
+            try:
+                return float(match.group(1).replace(',', ''))
+            except ValueError:
+                return None
         cleaned = re.sub(r'[^\d.]', '', value_str)
         try:
             return float(cleaned) if cleaned else None
-        except:
+        except (TypeError, ValueError):
             return None
     
     @staticmethod

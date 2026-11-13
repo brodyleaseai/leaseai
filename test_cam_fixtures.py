@@ -157,6 +157,16 @@ class EngineMathTests(unittest.TestCase):
         self.assertEqual(merged["cam_cap_percentage"], 5.0)
         self.assertAlmostEqual(merged["tenant_prorata_share"], 0.125, places=4)
 
+    def test_enrich_reads_base_amount_and_audit_fields(self):
+        merged = enrich_cam_provisions({}, {
+            "CAM Base Amount": "$100,000.00 tenant share in CAM Base Year 2023",
+            "Tenant Audit Rights": "Yes. Tenant is ALLOWED to inspect.",
+            "Audit Deadline": "Within 90 days of receipt of the annual CAM reconciliation",
+        })
+        self.assertEqual(merged["cam_base_amount"], 100000.00)
+        self.assertTrue(merged["tenant_audit_right"])
+        self.assertIn("90 days", merged["audit_deadline"])
+
     def test_overcharge_is_critical(self):
         analysis = detect_discrepancies(
             S.TENANT_SHARE_BILLED,
@@ -337,6 +347,45 @@ class CamWorkpaperTests(unittest.TestCase):
         self.assertGreaterEqual(self.text.count("Allow"), 18)
         self.assertIn("roof replacement is", self.text.lower())
         self.assertIn("excluded per lease terms", self.text)
+        self.assertIn("$100,000.00", self.text)
+        self.assertIn("Within 90 days of receipt of the annual CAM reconciliation", self.text)
+        self.assertNotIn("Landlord'S", self.text)
+
+    def test_exclusions_are_listed_once_without_title_case(self):
+        description = (
+            "capital improvements, structural repairs, roof replacement, depreciation, "
+            "debt service, mortgage payments, legal fees relating to other tenants "
+            "or to Landlord's financing"
+        )
+        pdf_bytes = generate_cam_pdf_report(
+            {"property_address": S.PROPERTY_ADDRESS, "tenant_name": S.TENANT_NAME},
+            {
+                "reconciliation_year": 2025,
+                "statement_date": S.STATEMENT_DATE,
+                "landlord_total_charges": S.BUILDING_TOTAL_CHARGES,
+                "landlord_tenant_share": S.TENANT_SHARE_BILLED,
+                "calculated_tenant_share": 102625.00,
+                "variance_amount": 47375.00,
+                "excluded_building_charges": 379000.00,
+                "allowable_building_charges": 821000.00,
+                "cam_cap_applied": False,
+            },
+            assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))["line_items"],
+            {
+                "tenant_prorata_share": S.TENANT_PRORATA_SHARE,
+                "has_cam_cap": True,
+                "cam_cap_percentage": 5.0,
+                "cam_base_amount": None,
+                "excluded_items": [part.strip() for part in description.split(",")],
+                "exclusions_description": description,
+            },
+        )
+        text = _pdf_text_from_bytes(pdf_bytes)
+        self.assertIn("legal fees relating to other tenants", text)
+        self.assertIn("Landlord's financing", text)
+        self.assertNotIn("Landlord'S", text)
+        self.assertNotIn("Legal Fees Relating To", text)
+        self.assertIn("not applied because CAM Base Amount was not stored", text)
 
     def test_unanalyzed_items_are_flagged_in_the_pdf(self):
         parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))
