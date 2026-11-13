@@ -189,8 +189,73 @@ def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, la
         "allowable_building_charges": calc_result.get("allowable_building_charges"),
         "cam_cap_applied": calc_result.get("cam_cap_applied"),
         "provisions_used": provisions,
+        "analyzed_line_items": calc_result.get("analyzed_line_items") or [],
     }
     return st.session_state["cam_calc_results"]
+
+
+def load_lease_and_provisions(lease_id):
+    lease_res = sb.table("leases").select("*").eq("id", lease_id).execute()
+    lease_data = lease_res.data[0] if lease_res.data else {}
+    cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", lease_id).execute()
+    cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+    return lease_data, cam_prov
+
+
+def report_line_items(results, cam_prov):
+    stored = results.get("analyzed_line_items") or []
+    if stored:
+        return stored
+    parsed = st.session_state.get("parsed_cam_statement") or {}
+    return analyze_line_items(parsed.get("line_items") or [], cam_prov or {})
+
+
+def build_cam_report(results):
+    """Generate the tenant CAM workpaper and cache it for download / email."""
+    from cam_pdf_report import cam_report_filename, generate_cam_pdf_report
+
+    lease_data, cam_prov = load_lease_and_provisions(results["lease_id"])
+    lease_data = dict(lease_data or {})
+    fields = load_extracted_field_map(results["lease_id"])
+    if not lease_data.get("landlord_name"):
+        lease_data["landlord_name"] = (
+            fields.get("Landlord Legal Name") or fields.get("Landlord Name")
+        )
+    if not lease_data.get("tenant_name"):
+        lease_data["tenant_name"] = (
+            fields.get("Tenant Legal Name") or fields.get("Tenant Name")
+        )
+    if not lease_data.get("property_address"):
+        lease_data["property_address"] = fields.get("Property Address")
+    provisions = results.get("provisions_used") or cam_prov
+    line_items = report_line_items(results, provisions)
+    recon_data = {
+        "reconciliation_year": results["recon_year"],
+        "statement_date": (
+            results["statement_date"].isoformat()
+            if hasattr(results["statement_date"], "isoformat")
+            else results["statement_date"]
+        ),
+        "landlord_total_charges": results["landlord_total"],
+        "landlord_tenant_share": results["tenant_share_billed"],
+        "calculated_total_charges": results.get("allowable_building_charges"),
+        "calculated_tenant_share": results["calculated_share"],
+        "variance_amount": results["variance"],
+        "variance_percentage": results["variance_percentage"],
+        "calculations": results.get("calculations") or [],
+        "excluded_building_charges": results.get("excluded_building_charges") or 0,
+        "allowable_building_charges": results.get("allowable_building_charges"),
+        "cam_cap_applied": results.get("cam_cap_applied"),
+    }
+    pdf_bytes = generate_cam_pdf_report(lease_data, recon_data, line_items, provisions)
+    filename = cam_report_filename(lease_data, results["recon_year"])
+    st.session_state["cam_report_pdf"] = pdf_bytes
+    st.session_state["cam_report_filename"] = filename
+    st.session_state["cam_report_context"] = {
+        "lease_data": lease_data,
+        "filename": filename,
+    }
+    return pdf_bytes, filename, lease_data
 
 def get_severity_badge(severity):
     """Return colored badge for severity"""
@@ -641,13 +706,13 @@ with tab2:
             
             with col1:
                 st.metric(
-                    "Landlord Billed Amount",
+                    "Tenant share billed",
                     format_currency(results['tenant_share_billed'])
                 )
             
             with col2:
                 st.metric(
-                    "Correct Amount (Per Lease)",
+                    "Tenant share allowed by lease",
                     format_currency(results['calculated_share'])
                 )
             
@@ -696,58 +761,38 @@ with tab2:
                     cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", results['lease_id']).execute()
                     cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
                     
-                    # Analyze line items
-                    analyzed_items = analyze_line_items(line_items, cam_prov)
-                    
-                    # Create detailed DataFrame
+                    analyzed_items = results.get("analyzed_line_items") or analyze_line_items(line_items, cam_prov)
                     df_items = pd.DataFrame(analyzed_items)
-                    
-                    # Add status indicator
-                    def get_status(row):
-                        variance = abs(row.get('variance', 0))
-                        if variance < 50:
-                            return '✅ OK'
-                        elif variance < 200:
-                            return '⚠️ Review'
-                        else:
-                            return '🚨 Challenge'
-                    
-                    if not df_items.empty and 'variance' in df_items.columns:
-                        df_items['Status'] = df_items.apply(get_status, axis=1)
-                        
-                        # Format amount columns
-                        if 'amount' in df_items.columns:
-                            df_items['Amount'] = df_items['amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
-                        if 'variance' in df_items.columns:
-                            df_items['Variance'] = df_items['variance'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "-")
-                        
-                        # Select display columns
-                        display_cols = []
-                        for col in ['line_number', 'description', 'category', 'Amount', 'Variance', 'Status', 'notes']:
-                            if col in df_items.columns:
-                                display_cols.append(col)
-                        
-                        if display_cols:
-                            # Color-code rows based on variance
-                            def highlight_variance(row):
-                                variance = row.get('variance', 0) if 'variance' in df_items.columns else 0
-                                if abs(variance) < 50:
-                                    return ['background-color: #d4edda'] * len(row)
-                                elif abs(variance) < 200:
-                                    return ['background-color: #fff3cd'] * len(row)
-                                else:
-                                    return ['background-color: #f8d7da'] * len(row)
-                            
-                            # Display styled table
-                            st.dataframe(
-                                df_items[display_cols].style.apply(highlight_variance, axis=1) if 'variance' in df_items.columns else df_items[display_cols],
-                                use_container_width=True,
-                                hide_index=True
-                            )
-                        else:
-                            st.dataframe(df_items, use_container_width=True, hide_index=True)
-                    else:
+
+                    if df_items.empty:
                         st.dataframe(df_items, use_container_width=True, hide_index=True)
+                    else:
+                        def flag_label(row):
+                            return "🚨 Challenge" if row.get("should_challenge") else "✅ Allow"
+
+                        def reason_label(row):
+                            if row.get("should_challenge"):
+                                return row.get("dispute_reason") or row.get("notes") or "Excluded per lease"
+                            return "Included in CAM"
+
+                        df_items["Flag"] = df_items.apply(flag_label, axis=1)
+                        df_items["Reason"] = df_items.apply(reason_label, axis=1)
+                        if "amount" in df_items.columns:
+                            df_items["Landlord amount"] = df_items["amount"].apply(
+                                lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A"
+                            )
+                        display_cols = [
+                            col for col in [
+                                "line_number",
+                                "description",
+                                "category",
+                                "Landlord amount",
+                                "Flag",
+                                "Reason",
+                            ]
+                            if col in df_items.columns
+                        ]
+                        st.dataframe(df_items[display_cols], use_container_width=True, hide_index=True)
                     
                     # Summary of flagged items
                     flagged = [item for item in analyzed_items if item.get('should_challenge', False)]
@@ -763,56 +808,10 @@ with tab2:
             
             with col_action1:
                 if st.button("📄 Generate PDF Report", use_container_width=True, type="secondary"):
-                    with st.spinner("Generating professional PDF report..."):
+                    with st.spinner("Generating CAM workpaper..."):
                         try:
-                            from cam_pdf_report import generate_cam_pdf_report
-                            
-                            # Get all required data
-                            lease_res = sb.table("leases").select("*").eq("id", results['lease_id']).execute()
-                            lease_data = lease_res.data[0] if lease_res.data else {}
-                            
-                            cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", results['lease_id']).execute()
-                            cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
-                            
-                            # Get line items if available
-                            line_items = []
-                            if 'parsed_cam_statement' in st.session_state:
-                                line_items = st.session_state['parsed_cam_statement'].get('line_items', [])
-                            
-                            # Build reconciliation dict
-                            recon_data = {
-                                'reconciliation_year': results['recon_year'],
-                                'statement_date': results['statement_date'].isoformat(),
-                                'landlord_total_charges': results['landlord_total'],
-                                'landlord_tenant_share': results['tenant_share_billed'],
-                                'calculated_total_charges': results['landlord_total'],
-                                'calculated_tenant_share': results['calculated_share'],
-                                'variance_amount': results['variance'],
-                                'variance_percentage': results['variance_percentage']
-                            }
-                            
-                            # Generate PDF
-                            pdf_bytes = generate_cam_pdf_report(
-                                lease_data,
-                                recon_data,
-                                line_items,
-                                cam_prov
-                            )
-                            
-                            # Offer download
-                            property_name = lease_data.get('property_address', 'Property').replace(' ', '_')[:30]
-                            filename = f"CAM_Reconciliation_{property_name}_{results['recon_year']}.pdf"
-                            
-                            st.download_button(
-                                label="⬇️ Download PDF Report",
-                                data=pdf_bytes,
-                                file_name=filename,
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-                            
-                            st.success("✅ PDF report generated!")
-                        
+                            build_cam_report(results)
+                            st.success("✅ CAM workpaper generated. Download it, or email it to the client.")
                         except Exception as e:
                             st.error(f"PDF generation error: {str(e)}")
             
@@ -874,7 +873,74 @@ with tab2:
                         st.info("💡 Variance is minor (< $100). Dispute letter not needed.")
             
             with col_action3:
-                pass  # Reserved for future action button
+                if st.button("✉️ Email Report to Client", use_container_width=True, type="secondary"):
+                    st.session_state["show_cam_email"] = True
+
+            if st.session_state.get("cam_report_pdf"):
+                st.download_button(
+                    label="⬇️ Download PDF Report",
+                    data=st.session_state["cam_report_pdf"],
+                    file_name=st.session_state.get("cam_report_filename") or "CAM_Reconciliation.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="download_cam_workpaper",
+                )
+
+            if st.session_state.get("show_cam_email"):
+                st.markdown("#### Email the workpaper")
+                default_email = st.session_state.get("user_email") or ""
+                default_name = (
+                    st.session_state.get("user_name")
+                    or (st.session_state.get("cam_report_context") or {}).get("lease_data", {}).get("tenant_name")
+                    or "Client"
+                )
+                col_email, col_name = st.columns(2)
+                with col_email:
+                    recipient_email = st.text_input(
+                        "Client email",
+                        value=default_email,
+                        key="cam_report_email",
+                    )
+                with col_name:
+                    recipient_name = st.text_input(
+                        "Client name",
+                        value=default_name,
+                        key="cam_report_recipient_name",
+                    )
+                if st.button("Send CAM workpaper", type="primary", key="send_cam_report"):
+                    if not recipient_email or "@" not in recipient_email:
+                        st.error("Enter a valid client email address.")
+                    else:
+                        try:
+                            pdf_bytes = st.session_state.get("cam_report_pdf")
+                            filename = st.session_state.get("cam_report_filename")
+                            lease_data = (st.session_state.get("cam_report_context") or {}).get("lease_data") or {}
+                            if not pdf_bytes:
+                                pdf_bytes, filename, lease_data = build_cam_report(results)
+                            from email_delivery import send_cam_report_email
+                            recommendation = "CHALLENGE" if abs(results["variance"]) >= 100 else "ACCEPT"
+                            sent = send_cam_report_email(
+                                recipient_email=recipient_email.strip(),
+                                recipient_name=recipient_name.strip() or "Client",
+                                property_address=lease_data.get("property_address") or "the leased premises",
+                                tenant_name=lease_data.get("tenant_name") or recipient_name,
+                                year=results["recon_year"],
+                                pdf_bytes=pdf_bytes,
+                                billed_share=results["tenant_share_billed"],
+                                allowed_share=results["calculated_share"],
+                                variance_amount=results["variance"],
+                                recommendation=recommendation,
+                            )
+                            if sent:
+                                st.success(f"CAM workpaper emailed to {recipient_email.strip()}.")
+                                st.session_state["show_cam_email"] = False
+                            else:
+                                st.error(
+                                    "SendGrid did not send the email. Check SENDGRID_API_KEY in "
+                                    "the environment or .env, then try again. You can still download the PDF."
+                                )
+                        except Exception as e:
+                            st.error(f"Email error: {str(e)}")
             
             st.markdown("---")
             

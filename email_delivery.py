@@ -268,6 +268,123 @@ def send_lease_abstract_email(
         return False
 
 
+def send_cam_report_email(
+    recipient_email: str,
+    recipient_name: str,
+    property_address: str,
+    tenant_name: str,
+    year,
+    pdf_bytes: bytes,
+    billed_share: float,
+    allowed_share: float,
+    variance_amount: float,
+    recommendation: str,
+) -> bool:
+    """Send the CAM reconciliation workpaper PDF to the client."""
+    year_label = year or "CAM"
+    overcharge = variance_amount > 0
+    variance_label = "Overcharge" if overcharge else ("Credit due tenant" if variance_amount < 0 else "Variance")
+    subject = f"CAM Reconciliation Workpaper ({year_label}) — {property_address}"
+    rec = (recommendation or "REVIEW").upper()
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a237e;">Your CAM Reconciliation Workpaper is Ready</h2>
+
+            <p>Dear {recipient_name},</p>
+
+            <p>
+                LeaseAI compared the landlord's {year_label} year-end CAM / operating expense
+                statement to the CAM terms in the lease. The attached PDF is the tenant-side
+                workpaper for your file, your accountant, or a dispute letter to the landlord.
+            </p>
+
+            <div style="background-color: #E8EAF6; padding: 15px; border-left: 4px solid #1a237e; margin: 20px 0;">
+                <strong>Property:</strong> {property_address}<br>
+                <strong>Tenant:</strong> {tenant_name}<br>
+                <strong>Year:</strong> {year_label}<br>
+                <strong>Tenant share billed:</strong> ${float(billed_share or 0):,.2f}<br>
+                <strong>Tenant share allowed by lease:</strong> ${float(allowed_share or 0):,.2f}<br>
+                <strong>{variance_label}:</strong> ${abs(float(variance_amount or 0)):,.2f}<br>
+                <strong>Recommendation:</strong> {rec}
+            </div>
+
+            <p>
+                This is a calculation workpaper, not a legal opinion. Please review the flagged
+                line items and the calculation walkthrough before paying the billed true-up.
+            </p>
+
+            <p>Best regards,<br>
+            <strong>{config.SENDER_NAME}</strong><br>
+            {config.COMPANY_NAME}<br>
+            {config.COMPANY_LOCATION}</p>
+
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+            <p style="font-size: 12px; color: #666;">
+                This is an automated message from {config.APP_NAME}.
+                Please do not reply directly to this email.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    plain_content = f"""
+    Your CAM Reconciliation Workpaper is Ready
+
+    Dear {recipient_name},
+
+    LeaseAI compared the landlord's {year_label} year-end CAM / operating expense
+    statement to the CAM terms in the lease. The attached PDF is the tenant-side
+    workpaper for your file, your accountant, or a dispute letter to the landlord.
+
+    Property: {property_address}
+    Tenant: {tenant_name}
+    Year: {year_label}
+    Tenant share billed: ${float(billed_share or 0):,.2f}
+    Tenant share allowed by lease: ${float(allowed_share or 0):,.2f}
+    {variance_label}: ${abs(float(variance_amount or 0)):,.2f}
+    Recommendation: {rec}
+
+    This is a calculation workpaper, not a legal opinion.
+
+    Best regards,
+    {config.SENDER_NAME}
+    {config.COMPANY_NAME}
+    {config.COMPANY_LOCATION}
+    """
+
+    message = Mail(
+        from_email=(config.SENDER_EMAIL, config.SENDER_NAME),
+        to_emails=recipient_email,
+        subject=subject,
+        plain_text_content=plain_content,
+        html_content=html_content,
+    )
+    encoded_pdf = base64.b64encode(pdf_bytes).decode()
+    slug = "".join(ch if ch.isalnum() else "_" for ch in (property_address or "Property"))[:40]
+    attachment = Attachment(
+        FileContent(encoded_pdf),
+        FileName(f"CAM_Reconciliation_{slug}_{year_label}.pdf"),
+        FileType("application/pdf"),
+        Disposition("attachment"),
+    )
+    message.attachment = attachment
+
+    try:
+        if not config.SENDGRID_API_KEY or config.SENDGRID_API_KEY == "your-sendgrid-key-here":
+            print("SendGrid not configured — skipping CAM report email")
+            return False
+        sg = SendGridAPIClient(config.SENDGRID_API_KEY)
+        response = sg.send(message)
+        return response.status_code in [200, 202]
+    except Exception as e:
+        print(f"Failed to send CAM report email: {str(e)}")
+        return False
+
+
 def send_critical_date_reminder(
     client_email: str,
     client_name: str,

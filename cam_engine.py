@@ -591,7 +591,7 @@ class CAMCalculationEngine:
         if excluded_building:
             steps.append({
                 'step': 'Excluded costs removed from building total',
-                'formula': f'${landlord_total:,.2f} − ${excluded_building:,.2f}',
+                'formula': f'${landlord_total:,.2f} - ${excluded_building:,.2f}',
                 'result': allowable_building,
             })
         steps.extend(calc.get('calculations') or [])
