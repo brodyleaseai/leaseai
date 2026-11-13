@@ -3,6 +3,7 @@ config.py
 __pycache__/
 *.pyc
 *.pdf
+!tests/fixtures/cam/*.pdf
 .streamlit/secrets.toml
 .DS_Store
 Thumbs.db
