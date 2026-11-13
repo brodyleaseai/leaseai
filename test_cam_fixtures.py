@@ -99,6 +99,27 @@ class EngineMathTests(unittest.TestCase):
         self.assertTrue(result["cam_cap_applied"])
         self.assertEqual(result["calculated_tenant_share"], S.CALCULATED_TENANT_SHARE)
 
+    def test_none_prorata_falls_back_to_square_footage(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": None,
+            "tenant_square_footage": S.PREMISES_RSF,
+            "building_square_footage": S.BUILDING_RSF,
+            "has_cam_cap": True,
+            "cam_cap_percentage": S.CAM_CAP_PERCENTAGE,
+            "cam_base_amount": S.CAM_BASE_AMOUNT,
+        })
+        self.assertEqual(result["calculated_tenant_share"], S.CALCULATED_TENANT_SHARE)
+
+    def test_none_cap_fields_do_not_crash(self):
+        result = calculate_cam_charges(S.BUILDING_TOTAL_CHARGES, {
+            "tenant_prorata_share": None,
+            "has_cam_cap": True,
+            "cam_cap_percentage": None,
+            "cam_base_amount": None,
+        })
+        self.assertEqual(result["calculated_tenant_share"], 0.0)
+        self.assertFalse(result["cam_cap_applied"])
+
     def test_overcharge_is_critical(self):
         analysis = detect_discrepancies(
             S.TENANT_SHARE_BILLED,

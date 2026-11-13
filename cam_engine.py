@@ -482,9 +482,13 @@ class CAMCalculationEngine:
         Returns:
             Dictionary with calculation results
         """
+        cam_provisions = cam_provisions or {}
+        total_cam_charges = CAMCalculationEngine._as_float(total_cam_charges, 0.0)
+        prorata_share = CAMCalculationEngine._prorata_share(cam_provisions)
+
         result = {
             'total_building_charges': total_cam_charges,
-            'tenant_prorata_share': cam_provisions.get('tenant_prorata_share', 0),
+            'tenant_prorata_share': prorata_share,
             'calculated_tenant_share': 0,
             'cam_stop_applied': False,
             'cam_cap_applied': False,
@@ -492,7 +496,6 @@ class CAMCalculationEngine:
         }
         
         # Step 1: Calculate base tenant share (pro-rata)
-        prorata_share = cam_provisions.get('tenant_prorata_share', 0)
         tenant_share = total_cam_charges * prorata_share
         result['calculations'].append({
             'step': 'Pro-rata calculation',
@@ -501,7 +504,7 @@ class CAMCalculationEngine:
         })
         
         # Step 2: Apply CAM stop if applicable
-        cam_stop = cam_provisions.get('cam_stop_amount')
+        cam_stop = CAMCalculationEngine._as_float(cam_provisions.get('cam_stop_amount'), None)
         if cam_stop and tenant_share > cam_stop:
             overage = tenant_share - cam_stop
             result['cam_stop_applied'] = True
@@ -513,9 +516,15 @@ class CAMCalculationEngine:
             tenant_share = overage
         
         # Step 3: Apply CAM cap if applicable
-        if cam_provisions.get('has_cam_cap'):
-            cap_percentage = cam_provisions.get('cam_cap_percentage', 0)
-            base_amount = cam_provisions.get('cam_base_amount', tenant_share)
+        cap_percentage = CAMCalculationEngine._as_float(
+            cam_provisions.get('cam_cap_percentage'), None
+        )
+        if cam_provisions.get('has_cam_cap') and cap_percentage:
+            base_amount = CAMCalculationEngine._as_float(
+                cam_provisions.get('cam_base_amount'), None
+            )
+            if base_amount is None:
+                base_amount = tenant_share
             
             max_increase = base_amount * (cap_percentage / 100)
             capped_amount = base_amount + max_increase
@@ -531,6 +540,26 @@ class CAMCalculationEngine:
         
         result['calculated_tenant_share'] = round(tenant_share, 2)
         return result
+
+    @staticmethod
+    def _as_float(value, default=0.0):
+        if value is None or value == '':
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _prorata_share(cam_provisions: Dict) -> float:
+        share = CAMCalculationEngine._as_float(cam_provisions.get('tenant_prorata_share'), None)
+        if share is None:
+            tenant_sf = CAMCalculationEngine._as_float(cam_provisions.get('tenant_square_footage'), 0)
+            building_sf = CAMCalculationEngine._as_float(cam_provisions.get('building_square_footage'), 0)
+            share = (tenant_sf / building_sf) if tenant_sf and building_sf else 0.0
+        if share > 1:
+            share = share / 100.0
+        return share
     
     @staticmethod
     def analyze_line_items(

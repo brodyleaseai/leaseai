@@ -4,7 +4,11 @@ import os
 from datetime import datetime
 import json
 
-from cam_engine import defaults_from_parsed_statement, calculate_cam_charges
+from cam_engine import (
+    analyze_line_items,
+    calculate_cam_charges,
+    defaults_from_parsed_statement,
+)
 
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -139,6 +143,8 @@ def store_parsed_statement(parsed):
 
 def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, landlord_total, tenant_share_billed):
     """Compare billed tenant share to the amount allowed by the lease."""
+    landlord_total = float(landlord_total or 0)
+    tenant_share_billed = float(tenant_share_billed or 0)
     if cam_provisions:
         calc_result = calculate_cam_charges(landlord_total, cam_provisions)
         calculated_share = calc_result["calculated_tenant_share"]
@@ -482,31 +488,41 @@ with tab2:
             
             if line_items:
                 st.markdown("### 📊 Extracted Line Items")
-                st.write(f"**Total items:** {len(line_items)}")
+                analyzed_items = analyze_line_items(line_items, cam_provisions or {})
+                challenged = [item for item in analyzed_items if item.get("should_challenge")]
+                st.write(f"**Total items:** {len(analyzed_items)}")
+                if challenged:
+                    st.warning(
+                        f"{len(challenged)} line item(s) look excluded under this lease "
+                        f"(capital, structural, legal, depreciation, or debt service)."
+                    )
+                elif not cam_provisions:
+                    st.caption("Extract CAM provisions on this lease to flag excluded rows here.")
                 
-                # Display in table
                 import pandas as pd
-                df = pd.DataFrame(line_items)
+                rows = []
+                for item in analyzed_items:
+                    amount = item.get("amount", item.get("landlord_amount", 0)) or 0
+                    rows.append({
+                        "#": item.get("line_number"),
+                        "Description": item.get("description"),
+                        "Category": item.get("category"),
+                        "Amount": f"${float(amount):,.2f}",
+                        "Flag": "Challenge" if item.get("should_challenge") else "OK",
+                        "Reason": item.get("dispute_reason") or "",
+                    })
+                df = pd.DataFrame(rows)
                 if not df.empty:
-                    # Format amount column
-                    if 'amount' in df.columns:
-                        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
-                    
                     st.dataframe(df, use_container_width=True, hide_index=True)
                     
-                    # Summary by category
                     with st.expander("📈 Summary by Category"):
-                        # Recreate numeric column for grouping
-                        line_items_for_summary = parsed_data.get('line_items', [])
-                        if line_items_for_summary:
-                            category_totals = {}
-                            for item in line_items_for_summary:
-                                cat = item.get('category', 'OTHER')
-                                amt = float(item.get('amount', 0))
-                                category_totals[cat] = category_totals.get(cat, 0) + amt
-                            
-                            for cat, total in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
-                                st.write(f"**{cat}:** ${total:,.2f}")
+                        category_totals = {}
+                        for item in analyzed_items:
+                            cat = item.get('category', 'OTHER')
+                            amt = float(item.get('amount', item.get('landlord_amount', 0)) or 0)
+                            category_totals[cat] = category_totals.get(cat, 0) + amt
+                        for cat, total in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+                            st.write(f"**{cat}:** ${total:,.2f}")
         
         st.markdown("---")
         
