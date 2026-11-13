@@ -112,7 +112,10 @@ class CAMStatementGPTParser:
     CAM_PARSING_PROMPT = """
 You are a commercial real estate CAM charge auditor. Parse this landlord CAM reconciliation statement.
 
-Extract ALL line items with:
+Extract ALL numbered line items. Do not skip capital improvements, roof replacement,
+structural repairs, legal fees, depreciation, debt service, mortgage interest, or any
+italic / shaded / “excluded” rows — those must still appear in line_items.
+
 1. **Description**: What the charge is for (exactly as written)
 2. **Category**: Classify into ONE of these categories:
    - UTILITIES (electric, gas, water, sewer)
@@ -129,6 +132,11 @@ Extract ALL line items with:
    - ELEVATOR (elevator maintenance)
    - PARKING (parking lot maintenance)
    - ADMIN (administrative costs)
+   - CAPITAL_IMPROVEMENTS (roof replacement, capital projects)
+   - STRUCTURAL_REPAIRS
+   - LEGAL_FEES
+   - DEPRECIATION
+   - DEBT_SERVICE (mortgage interest, debt service)
    - OTHER (anything that doesn't fit above)
 
 3. **Amount**: The dollar amount (just the number, no $ or commas)
@@ -185,15 +193,16 @@ CAM Statement:
             )
             
             result = json.loads(response.choices[0].message.content)
-            
-            # Add metadata
-            result['parsing_method'] = 'GPT-4o'
-            result['total_line_items'] = len(result.get('line_items', []))
-            
-            return result
+            from cam_engine import assemble_cam_statement
+            return assemble_cam_statement(statement_text, result)
             
         except Exception as e:
             print(f"Error in GPT-4o CAM parsing: {str(e)}")
+            from cam_engine import assemble_cam_statement
+            assembled = assemble_cam_statement(statement_text)
+            if assembled.get('line_items'):
+                assembled['gpt_error'] = str(e)
+                return assembled
             return {
                 'error': str(e),
                 'parsing_method': 'FAILED',
@@ -221,8 +230,9 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         
         text = ""
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() + "\n"
+            for page_num, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text() or ""
+                text += f"\n--- Page {page_num} ---\n{page_text}\n"
         
         return text
     except ImportError:
@@ -232,8 +242,9 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         text = ""
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+            for page_num, page in enumerate(pdf_reader.pages, 1):
+                page_text = page.extract_text() or ""
+                text += f"\n--- Page {page_num} ---\n{page_text}\n"
         
         return text
     except Exception as e:

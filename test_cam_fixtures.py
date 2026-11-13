@@ -11,9 +11,12 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "cam"))
 import scenario as S  # noqa: E402
 from cam_engine import (  # noqa: E402
     analyze_line_items,
+    assemble_cam_statement,
     calculate_cam_charges,
+    defaults_from_parsed_statement,
     detect_discrepancies,
 )
+from cam_gpt_extractor import extract_text_from_pdf  # noqa: E402
 
 
 def _pdf_text(path: Path) -> str:
@@ -124,6 +127,65 @@ class EngineMathTests(unittest.TestCase):
             sum(item["variance_amount"] for item in analyzed),
             sum(amount for _, _, amount in S.EXCLUDED_LINE_ITEMS),
         )
+
+    def test_exclusions_flagged_from_description_when_category_is_other(self):
+        line_items = [
+            {
+                "line_number": 19,
+                "description": "Roof replacement — full membrane (capital improvement)",
+                "category": "OTHER",
+                "amount": 180000.00,
+            }
+        ]
+        analyzed = analyze_line_items(line_items, S.PROVISIONS_FOR_ENGINE)
+        self.assertTrue(analyzed[0]["should_challenge"])
+        self.assertEqual(analyzed[0]["variance"], 180000.00)
+
+
+class StatementParseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = extract_text_from_pdf(str(S.STATEMENT_PDF))
+        cls.parsed = assemble_cam_statement(cls.text)
+
+    def test_extracts_both_pdf_pages(self):
+        self.assertIn("Window washing", self.text)
+        self.assertIn("Roof replacement", self.text)
+        self.assertIn("debt service", self.text.lower())
+
+    def test_keeps_all_23_numbered_lines(self):
+        items = self.parsed["line_items"]
+        self.assertEqual(len(items), 23)
+        descriptions = " ".join(item["description"] for item in items)
+        self.assertIn("Roof replacement", descriptions)
+        self.assertIn("Structural steel", descriptions)
+        self.assertIn("Depreciation", descriptions)
+        self.assertIn("debt service", descriptions.lower())
+        self.assertEqual(self.parsed["total_building_charges"], 1200000.00)
+        self.assertEqual(self.parsed["tenant_share_billed"], 150000.00)
+
+    def test_gpt_dropping_page_two_does_not_lose_exclusions(self):
+        incomplete_gpt = {
+            "line_items": self.parsed["line_items"][:18],
+            "total_building_charges": 821000,
+            "tenant_share_billed": 150000,
+        }
+        merged = assemble_cam_statement(self.text, incomplete_gpt)
+        self.assertEqual(len(merged["line_items"]), 23)
+        self.assertEqual(merged["total_building_charges"], 1200000.00)
+
+    def test_step_two_defaults_match_the_statement(self):
+        defaults = defaults_from_parsed_statement(self.parsed)
+        self.assertEqual(defaults["recon_year"], 2025)
+        self.assertEqual(defaults["statement_date"].isoformat(), "2026-03-15")
+        self.assertEqual(defaults["landlord_total"], 1200000.00)
+        self.assertEqual(defaults["tenant_share_billed"], 150000.00)
+
+    def test_five_planted_exclusions_are_challenged(self):
+        analyzed = analyze_line_items(self.parsed["line_items"], S.PROVISIONS_FOR_ENGINE)
+        challenged = [item for item in analyzed if item["should_challenge"]]
+        self.assertEqual(len(challenged), 5)
+        self.assertEqual(sum(item["variance"] for item in challenged), 379000.00)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 import json
 
+from cam_engine import defaults_from_parsed_statement, calculate_cam_charges
+
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="LeaseAI CAM Reconciliation",
@@ -95,6 +97,52 @@ def format_currency(amount):
     if amount is None:
         return "N/A"
     return f"${amount:,.2f}"
+
+def init_cam_form_state():
+    """Create Step 2 widget keys before the inputs render."""
+    today = datetime.now()
+    st.session_state.setdefault("cam_recon_year", today.year - 1)
+    st.session_state.setdefault("cam_statement_date", today.date())
+    st.session_state.setdefault("cam_landlord_total", 0.0)
+    st.session_state.setdefault("cam_tenant_share_billed", 0.0)
+
+def store_parsed_statement(parsed):
+    """Copy statement totals into Step 2 and queue an automatic calculation."""
+    defaults = defaults_from_parsed_statement(parsed)
+    st.session_state["parsed_cam_statement"] = parsed
+    st.session_state["cam_recon_year"] = int(defaults["recon_year"])
+    st.session_state["cam_statement_date"] = defaults["statement_date"]
+    st.session_state["cam_landlord_total"] = float(defaults["landlord_total"])
+    st.session_state["cam_tenant_share_billed"] = float(defaults["tenant_share_billed"])
+    st.session_state["cam_run_calc_after_parse"] = True
+    n = parsed.get("total_line_items") or len(parsed.get("line_items") or [])
+    st.session_state["cam_parse_message"] = (
+        f"Extracted {n} line items and filled the reconciliation totals from the statement."
+    )
+
+def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, landlord_total, tenant_share_billed):
+    """Compare billed tenant share to the amount allowed by the lease."""
+    if cam_provisions:
+        calc_result = calculate_cam_charges(landlord_total, cam_provisions)
+        calculated_share = calc_result["calculated_tenant_share"]
+    else:
+        calculated_share = tenant_share_billed
+    variance = tenant_share_billed - calculated_share
+    variance_percentage = (
+        ((tenant_share_billed - calculated_share) / tenant_share_billed * 100)
+        if tenant_share_billed else 0
+    )
+    st.session_state["cam_calc_results"] = {
+        "lease_id": lease_id,
+        "recon_year": recon_year,
+        "statement_date": statement_date,
+        "landlord_total": landlord_total,
+        "tenant_share_billed": tenant_share_billed,
+        "calculated_share": calculated_share,
+        "variance": variance,
+        "variance_percentage": variance_percentage,
+    }
+    return st.session_state["cam_calc_results"]
 
 def get_severity_badge(severity):
     """Return colored badge for severity"""
@@ -238,6 +286,10 @@ with tab1:
 
 with tab2:
     st.markdown("### Create New CAM Reconciliation")
+    init_cam_form_state()
+    parse_message = st.session_state.pop("cam_parse_message", None)
+    if parse_message:
+        st.success(parse_message)
     
     # Step 1: Select Lease
     st.markdown("#### Step 1: Select Lease")
@@ -352,46 +404,56 @@ with tab2:
         
         st.markdown("---")
         
-        # Step 2: Reconciliation Details
+        # Step 2: Reconciliation Details (filled from the statement when parsed)
         st.markdown("#### Step 2: Reconciliation Details")
+        st.caption(
+            "These fill automatically after you parse the landlord CAM statement. "
+            "You can still override them. Use the building total and the tenant share billed — "
+            "not the remaining balance due."
+        )
         
         col1, col2 = st.columns(2)
+        max_year = max(datetime.now().year, int(st.session_state.get("cam_recon_year") or datetime.now().year))
         
         with col1:
             recon_year = st.number_input(
                 "Reconciliation Year",
                 min_value=2020,
-                max_value=datetime.now().year,
-                value=datetime.now().year - 1
+                max_value=max_year,
+                key="cam_recon_year",
             )
             
             statement_date = st.date_input(
                 "CAM Statement Date",
-                value=datetime.now()
+                key="cam_statement_date",
             )
         
         with col2:
             landlord_total = st.number_input(
                 "Total Landlord Charges (from CAM statement)",
                 min_value=0.0,
-                value=0.0,
                 step=100.0,
-                format="%.2f"
+                format="%.2f",
+                key="cam_landlord_total",
             )
             
             tenant_share_billed = st.number_input(
                 "Tenant Share Billed (your portion)",
                 min_value=0.0,
-                value=0.0,
                 step=100.0,
-                format="%.2f"
+                format="%.2f",
+                key="cam_tenant_share_billed",
             )
         
         st.markdown("---")
         
-        # Step 3: Upload CAM Statement (optional)
-        st.markdown("#### Step 3: Upload Landlord CAM Statement (Optional)")
-        st.caption("Upload the PDF or CSV of the landlord's CAM reconciliation statement for automatic line-item extraction")
+        # Step 3: Upload CAM Statement
+        st.markdown("#### Step 3: Upload Landlord CAM Statement")
+        st.caption(
+            "Upload the PDF of the landlord's year-end CAM statement. Parse pulls every numbered "
+            "line (including excluded capital/debt items), fills Step 2, and runs the reconciliation "
+            "against this lease."
+        )
         
         uploaded_file = st.file_uploader(
             "Upload CAM Statement",
@@ -431,25 +493,11 @@ with tab2:
                                 # Parse with GPT-4o
                                 parsed_data = parse_cam_statement_with_gpt(statement_text, api_key)
                                 
-                                if parsed_data.get('error'):
+                                if parsed_data.get('error') and not parsed_data.get('line_items'):
                                     st.error(f"Parsing failed: {parsed_data['error']}")
                                 else:
-                                    st.success(f"✅ Extracted {parsed_data.get('total_line_items', 0)} line items!")
-                                    st.balloons()
-                                    
-                                    # Store in session state
-                                    st.session_state['parsed_cam_statement'] = parsed_data
-                                    parsed_line_items = parsed_data.get('line_items', [])
-                                    parsed_metadata = parsed_data
-                                    
-                                    # Auto-fill fields if available
-                                    if parsed_data.get('total_building_charges'):
-                                        landlord_total = float(parsed_data['total_building_charges'])
-                                        st.info(f"Auto-filled: Total Building Charges = ${landlord_total:,.2f}")
-                                    
-                                    if parsed_data.get('tenant_share_billed'):
-                                        tenant_share_billed = float(parsed_data['tenant_share_billed'])
-                                        st.info(f"Auto-filled: Tenant Share Billed = ${tenant_share_billed:,.2f}")
+                                    store_parsed_statement(parsed_data)
+                                    st.rerun()
                             
                             # Clean up temp file
                             import os
@@ -496,42 +544,39 @@ with tab2:
         # Step 4: Calculate & Review
         st.markdown("#### Step 4: Calculate & Review")
         
-        if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
+        if st.session_state.pop("cam_run_calc_after_parse", False):
             if landlord_total > 0 and tenant_share_billed > 0:
                 try:
-                    from cam_engine import calculate_cam_charges
-                    
-                    # Calculate correct tenant share
-                    if cam_provisions:
-                        calc_result = calculate_cam_charges(landlord_total, cam_provisions)
-                        calculated_share = calc_result['calculated_tenant_share']
-                    else:
-                        # Fallback: assume direct billing
-                        calculated_share = tenant_share_billed
-                        calc_result = {'calculated_tenant_share': calculated_share}
-                    
-                    # Calculate variance
-                    variance = tenant_share_billed - calculated_share
-                    variance_percentage = ((tenant_share_billed - calculated_share) / tenant_share_billed * 100) if tenant_share_billed > 0 else 0
-                    
-                    # Store in session state so it persists across reruns
-                    st.session_state['cam_calc_results'] = {
-                        'lease_id': selected_lease_id,
-                        'recon_year': recon_year,
-                        'statement_date': statement_date,
-                        'landlord_total': landlord_total,
-                        'tenant_share_billed': tenant_share_billed,
-                        'calculated_share': calculated_share,
-                        'variance': variance,
-                        'variance_percentage': variance_percentage
-                    }
-                    
-                    st.success("✅ Calculation complete! Results shown below.")
-                    
+                    run_cam_calculation(
+                        selected_lease_id,
+                        cam_provisions,
+                        recon_year,
+                        statement_date,
+                        landlord_total,
+                        tenant_share_billed,
+                    )
+                    st.success("Reconciliation calculated from this lease and the CAM statement.")
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
             else:
-                st.warning("Please enter both the landlord total charges and tenant share billed amounts.")
+                st.warning("The statement was parsed, but building total or tenant share billed is still 0. Enter those amounts in Step 2.")
+
+        if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
+            if landlord_total > 0 and tenant_share_billed > 0:
+                try:
+                    run_cam_calculation(
+                        selected_lease_id,
+                        cam_provisions,
+                        recon_year,
+                        statement_date,
+                        landlord_total,
+                        tenant_share_billed,
+                    )
+                    st.success("✅ Calculation complete! Results shown below.")
+                except Exception as e:
+                    st.error(f"Calculation error: {str(e)}")
+            else:
+                st.warning("Parse the CAM statement, or enter both the landlord total charges and tenant share billed amounts.")
         
         # Show results if they exist in session state
         if 'cam_calc_results' in st.session_state:

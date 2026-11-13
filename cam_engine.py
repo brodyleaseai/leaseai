@@ -233,11 +233,15 @@ class CAMStatementParser:
         
         # Mapping of keywords to categories
         category_keywords = {
+            'CAPITAL_IMPROVEMENTS': ['CAPITAL IMPROVEMENT', 'ROOF REPLACEMENT', 'CAPITAL'],
+            'STRUCTURAL_REPAIRS': ['STRUCTURAL'],
+            'DEBT_SERVICE': ['DEBT SERVICE', 'MORTGAGE'],
+            'DEPRECIATION': ['DEPRECIATION'],
+            'LEGAL_FEES': ['LEGAL FEE', 'EVICTION'],
             'UTILITIES': ['ELECTRIC', 'GAS', 'WATER', 'SEWER', 'UTILITY', 'POWER'],
-            'MAINTENANCE': ['MAINTENANCE', 'REPAIR', 'FIX', 'UPKEEP'],
             'INSURANCE': ['INSURANCE', 'LIABILITY', 'COVERAGE'],
-            'PROPERTY_TAX': ['TAX', 'PROPERTY TAX', 'REAL ESTATE TAX'],
-            'MANAGEMENT_FEE': ['MANAGEMENT', 'ADMIN', 'MANAGEMENT FEE'],
+            'PROPERTY_TAX': ['PROPERTY TAX', 'REAL ESTATE TAX'],
+            'MANAGEMENT_FEE': ['MANAGEMENT FEE', 'MANAGEMENT'],
             'SECURITY': ['SECURITY', 'GUARD', 'SURVEILLANCE'],
             'LANDSCAPING': ['LANDSCAPE', 'LAWN', 'GROUNDS', 'GARDEN'],
             'SNOW_REMOVAL': ['SNOW', 'ICE', 'WINTER', 'PLOW'],
@@ -245,6 +249,7 @@ class CAMStatementParser:
             'HVAC': ['HVAC', 'HEATING', 'COOLING', 'AIR CONDITIONING', 'VENTILATION'],
             'ELEVATOR': ['ELEVATOR', 'LIFT'],
             'PARKING': ['PARKING', 'LOT'],
+            'MAINTENANCE': ['MAINTENANCE', 'REPAIR', 'FIX', 'UPKEEP'],
         }
         
         for category, keywords in category_keywords.items():
@@ -252,6 +257,204 @@ class CAMStatementParser:
                 return category
         
         return 'OTHER'
+
+    NUMBERED_AMOUNT = re.compile(
+        r'^\s*(\d+)\s+(.+?)\s+\$\s*([\d,]+\.\d{2})\s*$'
+    )
+    CATEGORY_SUFFIXES = [
+        ('Capital improvements', 'CAPITAL_IMPROVEMENTS'),
+        ('Structural repairs', 'STRUCTURAL_REPAIRS'),
+        ('Legal fees', 'LEGAL_FEES'),
+        ('Debt service', 'DEBT_SERVICE'),
+        ('Depreciation', 'DEPRECIATION'),
+        ('Management fee', 'MANAGEMENT_FEE'),
+        ('Snow removal', 'SNOW_REMOVAL'),
+        ('Property tax', 'PROPERTY_TAX'),
+        ('Utilities', 'UTILITIES'),
+        ('Janitorial', 'JANITORIAL'),
+        ('Landscaping', 'LANDSCAPING'),
+        ('Maintenance', 'MAINTENANCE'),
+        ('Insurance', 'INSURANCE'),
+        ('Elevator', 'ELEVATOR'),
+        ('Parking', 'PARKING'),
+        ('Security', 'SECURITY'),
+        ('HVAC', 'HVAC'),
+        ('Admin', 'ADMIN'),
+        ('Other', 'OTHER'),
+    ]
+
+    @staticmethod
+    def parse_numbered_line_items(statement_text: str) -> List[Dict]:
+        """Keep every numbered '$X,XXX.XX' row, including excluded capital/debt lines."""
+        items = []
+        seen = set()
+        for raw in (statement_text or "").splitlines():
+            match = CAMStatementParser.NUMBERED_AMOUNT.match(raw)
+            if not match:
+                continue
+            line_number = int(match.group(1))
+            if line_number in seen:
+                continue
+            seen.add(line_number)
+            remainder = match.group(2).strip()
+            amount = float(match.group(3).replace(',', ''))
+            category = None
+            description = remainder
+            for label, code in CAMStatementParser.CATEGORY_SUFFIXES:
+                suffix = f" {label}"
+                if remainder.lower().endswith(suffix.lower()):
+                    description = remainder[: -len(suffix)].strip()
+                    category = code
+                    break
+            if not category:
+                category = CAMStatementParser._categorize_line(remainder)
+            items.append({
+                'line_number': line_number,
+                'description': description,
+                'category': category,
+                'amount': amount,
+                'landlord_amount': amount,
+                'frequency': 'Annual',
+                'notes': None,
+            })
+        items.sort(key=lambda item: item['line_number'])
+        return items
+
+    @staticmethod
+    def extract_statement_totals(statement_text: str) -> Dict:
+        """Pull year, statement date, building total, and tenant share from statement text."""
+        text = statement_text or ""
+        totals: Dict = {}
+
+        year_match = re.search(r'(?:Calendar Year|Reconciliation Year|Period Year)\s+(\d{4})', text, re.I)
+        if not year_match:
+            year_match = re.search(r'\b(20\d{2})\s+annual', text, re.I)
+        if year_match:
+            totals['period_year'] = int(year_match.group(1))
+
+        date_match = re.search(
+            r'Statement Date:\s*([A-Za-z]+ \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})',
+            text,
+            re.I,
+        )
+        if date_match:
+            totals['statement_date'] = CAMStatementParser._parse_date_string(date_match.group(1))
+
+        building_match = re.search(
+            r'Total Building(?: CAM)? Charges[^\n$]*\$\s*([\d,]+\.\d{2})',
+            text,
+            re.I,
+        )
+        if building_match:
+            totals['total_building_charges'] = float(building_match.group(1).replace(',', ''))
+
+        share_match = re.search(
+            r'Tenant Share Billed[^\n$]*\$\s*([\d,]+\.\d{2})',
+            text,
+            re.I,
+        )
+        if share_match:
+            totals['tenant_share_billed'] = float(share_match.group(1).replace(',', ''))
+
+        return totals
+
+    @staticmethod
+    def _parse_date_string(value: str) -> Optional[str]:
+        if not value:
+            return None
+        value = value.strip()
+        for fmt in ('%Y-%m-%d', '%B %d, %Y', '%b %d, %Y'):
+            try:
+                return datetime.strptime(value, fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        return value
+
+    @staticmethod
+    def assemble_parsed_statement(statement_text: str, gpt_result: Optional[Dict] = None) -> Dict:
+        """Prefer numbered rows from the PDF so GPT cannot drop excluded charges."""
+        gpt_result = gpt_result or {}
+        numbered = CAMStatementParser.parse_numbered_line_items(statement_text)
+        gpt_items = gpt_result.get('line_items') or []
+        gpt_by_number = {}
+        for item in gpt_items:
+            try:
+                gpt_by_number[int(item.get('line_number'))] = item
+            except (TypeError, ValueError):
+                continue
+
+        if numbered:
+            line_items = []
+            for item in numbered:
+                gpt_item = gpt_by_number.get(item['line_number'], {})
+                notes = gpt_item.get('notes') or item.get('notes')
+                category = item.get('category') or gpt_item.get('category') or 'OTHER'
+                if category == 'OTHER' and gpt_item.get('category'):
+                    category = gpt_item['category']
+                amount = item['amount']
+                line_items.append({
+                    'line_number': item['line_number'],
+                    'description': item['description'],
+                    'category': category,
+                    'amount': amount,
+                    'landlord_amount': amount,
+                    'frequency': gpt_item.get('frequency') or 'Annual',
+                    'notes': notes,
+                })
+            parsing_method = 'numbered+gpt' if gpt_items else 'numbered'
+        else:
+            line_items = []
+            for item in gpt_items:
+                amount = item.get('amount', item.get('landlord_amount', 0)) or 0
+                line_items.append({
+                    **item,
+                    'amount': amount,
+                    'landlord_amount': amount,
+                })
+            parsing_method = gpt_result.get('parsing_method') or 'gpt'
+
+        totals = CAMStatementParser.extract_statement_totals(statement_text)
+        numbered_sum = round(sum(item.get('amount') or 0 for item in line_items), 2)
+        building_total = (
+            totals.get('total_building_charges')
+            or gpt_result.get('total_building_charges')
+            or numbered_sum
+        )
+        tenant_share = totals.get('tenant_share_billed') or gpt_result.get('tenant_share_billed')
+
+        return {
+            'statement_date': gpt_result.get('statement_date') or totals.get('statement_date'),
+            'period_year': gpt_result.get('period_year') or totals.get('period_year'),
+            'total_building_charges': building_total,
+            'tenant_share_billed': tenant_share,
+            'line_items': line_items,
+            'total_line_items': len(line_items),
+            'parsing_method': parsing_method,
+        }
+
+    @staticmethod
+    def defaults_from_parsed_statement(parsed: Dict) -> Dict:
+        """Values for the Step 2 reconciliation fields."""
+        statement_date = parsed.get('statement_date')
+        parsed_date = None
+        if statement_date:
+            try:
+                parsed_date = datetime.strptime(str(statement_date)[:10], '%Y-%m-%d').date()
+            except ValueError:
+                iso = CAMStatementParser._parse_date_string(str(statement_date))
+                if iso and iso != str(statement_date):
+                    parsed_date = datetime.strptime(iso, '%Y-%m-%d').date()
+
+        year = parsed.get('period_year')
+        if not year and parsed_date:
+            year = parsed_date.year - 1 if parsed_date.month <= 3 else parsed_date.year
+
+        return {
+            'recon_year': int(year) if year else datetime.now().year - 1,
+            'statement_date': parsed_date or datetime.now().date(),
+            'landlord_total': float(parsed.get('total_building_charges') or 0),
+            'tenant_share_billed': float(parsed.get('tenant_share_billed') or 0),
+        }
 
 
 class CAMCalculationEngine:
@@ -345,28 +548,52 @@ class CAMCalculationEngine:
             Line items with analysis flags and recommendations
         """
         analyzed_items = []
-        excluded_categories = cam_provisions.get('excluded_items', [])
         
         for item in line_items:
             analyzed = item.copy()
-            analyzed['is_excluded'] = False
-            analyzed['is_disputed'] = False
-            analyzed['dispute_reason'] = None
-            analyzed['recommended_action'] = 'ACCEPT'
-            
-            # Check if category is excluded per lease
-            category = item.get('category', '')
-            if any(excl in category for excl in excluded_categories):
-                analyzed['is_excluded'] = True
-                analyzed['is_disputed'] = True
-                analyzed['dispute_reason'] = f'{category} is excluded per lease terms'
-                analyzed['recommended_action'] = 'CHALLENGE'
-                analyzed['calculated_amount'] = 0
-                analyzed['variance_amount'] = item.get('landlord_amount', 0)
-            
+            amount = float(item.get('landlord_amount', item.get('amount', 0)) or 0)
+            analyzed['amount'] = amount
+            analyzed['landlord_amount'] = amount
+            excluded, reason = CAMCalculationEngine.line_item_exclusion(item, cam_provisions)
+            analyzed['is_excluded'] = excluded
+            analyzed['is_disputed'] = excluded
+            analyzed['should_challenge'] = excluded
+            analyzed['dispute_reason'] = reason
+            analyzed['recommended_action'] = 'CHALLENGE' if excluded else 'ACCEPT'
+            analyzed['calculated_amount'] = 0 if excluded else amount
+            analyzed['variance_amount'] = amount if excluded else 0
+            analyzed['variance'] = analyzed['variance_amount']
             analyzed_items.append(analyzed)
         
         return analyzed_items
+
+    @staticmethod
+    def line_item_exclusion(item: Dict, cam_provisions: Dict) -> Tuple[bool, Optional[str]]:
+        """Flag a line if the lease exclusions match its category or description."""
+        blob = " ".join([
+            str(item.get('category') or ''),
+            str(item.get('description') or ''),
+            str(item.get('notes') or ''),
+        ]).upper()
+        excluded = cam_provisions.get('excluded_items') or []
+        exclusion_text = " ".join(str(x) for x in excluded)
+        exclusion_text = f"{exclusion_text} {cam_provisions.get('exclusions_description') or ''}".upper()
+        if not exclusion_text.strip() and not excluded:
+            return False, None
+
+        checks = [
+            (['CAPITAL', 'ROOF'], 'Capital improvement / roof replacement is excluded per lease terms'),
+            (['STRUCTURAL'], 'Structural repairs are excluded per lease terms'),
+            (['DEPRECIATION'], 'Depreciation is excluded per lease terms'),
+            (['DEBT SERVICE', 'DEBT_SERVICE', 'MORTGAGE'], 'Debt service / mortgage is excluded per lease terms'),
+            (['LEGAL'], 'Legal fees relating to other tenants are excluded per lease terms'),
+        ]
+        for keys, reason in checks:
+            lease_has = any(key in exclusion_text for key in keys)
+            item_has = any(key in blob for key in keys)
+            if lease_has and item_has:
+                return True, reason
+        return False, None
     
     @staticmethod
     def detect_discrepancies(
@@ -507,7 +734,18 @@ def extract_cam_provisions_from_lease(extracted_fields: Dict) -> Dict:
 
 def parse_cam_statement(statement_text: str) -> List[Dict]:
     """Quick parsing of CAM statement"""
-    return CAMStatementParser.parse_statement_text(statement_text)
+    assembled = CAMStatementParser.assemble_parsed_statement(statement_text)
+    return assembled.get('line_items') or CAMStatementParser.parse_statement_text(statement_text)
+
+
+def assemble_cam_statement(statement_text: str, gpt_result: Optional[Dict] = None) -> Dict:
+    """Merge GPT output with numbered rows from the statement text."""
+    return CAMStatementParser.assemble_parsed_statement(statement_text, gpt_result)
+
+
+def defaults_from_parsed_statement(parsed: Dict) -> Dict:
+    """Step 2 field values from a parsed CAM statement."""
+    return CAMStatementParser.defaults_from_parsed_statement(parsed)
 
 
 def calculate_cam_charges(total_charges: float, provisions: Dict) -> Dict:
