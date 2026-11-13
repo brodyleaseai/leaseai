@@ -658,8 +658,13 @@ with tab2:
         
         st.markdown("---")
         
-        # Step 4: Calculate & Review
-        st.markdown("#### Step 4: Calculate & Review")
+        # Step 4: results. Parse in Step 2 already runs this calculation.
+        st.markdown("#### Step 4: Results")
+        st.caption(
+            "Parsing the statement in Step 2 fills the totals and runs this calculation "
+            "automatically. Recalculate only if you change a number in Step 3, or if you "
+            "typed totals without uploading a PDF."
+        )
         
         if st.session_state.pop("cam_run_calc_after_parse", False):
             if landlord_total > 0 and tenant_share_billed > 0:
@@ -678,7 +683,7 @@ with tab2:
             else:
                 st.warning("The statement was parsed, but building total or tenant share billed is still 0. Check the PDF totals in Step 3.")
 
-        if st.button("🧮 Calculate CAM Reconciliation", type="primary", use_container_width=True):
+        if st.button("Recalculate with Step 3 numbers", use_container_width=True):
             if landlord_total > 0 and tenant_share_billed > 0:
                 try:
                     run_cam_calculation(
@@ -689,7 +694,7 @@ with tab2:
                         landlord_total,
                         tenant_share_billed,
                     )
-                    st.success("✅ Calculation complete! Results shown below.")
+                    st.success("Recalculated with the Step 3 numbers.")
                 except Exception as e:
                     st.error(f"Calculation error: {str(e)}")
             else:

@@ -606,8 +606,11 @@ class CAMCalculationEngine:
             )
             if base_amount is None:
                 result['calculations'].append({
-                    'step': 'CAM cap skipped',
-                    'formula': f'{cap_percentage}% cap is in the lease but no CAM Base Amount was stored',
+                    'step': 'Yearly increase cap not used',
+                    'formula': (
+                        f'{cap_percentage}% cap needs the base-year tenant CAM amount, '
+                        f'which is not on this file'
+                    ),
                     'result': tenant_share
                 })
             else:

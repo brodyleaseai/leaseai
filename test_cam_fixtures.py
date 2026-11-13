@@ -385,7 +385,9 @@ class CamWorkpaperTests(unittest.TestCase):
         self.assertIn("Landlord's financing", text)
         self.assertNotIn("Landlord'S", text)
         self.assertNotIn("Legal Fees Relating To", text)
-        self.assertIn("not applied because CAM Base Amount was not stored", text)
+        self.assertIn("base-year tenant CAM amount", text)
+        self.assertIn("this file", text)
+        self.assertNotIn("CAM Base Amount was not stored", text)
 
     def test_unanalyzed_items_are_flagged_in_the_pdf(self):
         parsed = assemble_cam_statement(_pdf_text(S.STATEMENT_PDF))

@@ -130,13 +130,19 @@ def _cap_label(provisions: Dict) -> str:
     cap = provisions.get("cam_cap_percentage")
     has_cap = bool(provisions.get("has_cam_cap") or cap)
     if not has_cap:
-        return "No annual increase cap stored"
-    cap_display = f"{cap:g}%" if cap not in (None, "") else "yes"
+        return "No yearly increase cap on file"
+    cap_display = f"{cap:g}%" if cap not in (None, "") else "a set percentage"
     base = provisions.get("cam_base_amount")
     if base:
-        return f"Yes — {cap_display} annual increase, measured from CAM Base Amount {_money(base)}"
+        ceiling = _as_float(base) * (1 + _as_float(cap, 0) / 100.0)
+        return (
+            f"Yes. Tenant CAM may not rise more than {cap_display} above the "
+            f"base-year amount of {_money(base)} (ceiling {_money(ceiling)})."
+        )
     return (
-        f"Yes — {cap_display} in the lease; not applied because CAM Base Amount was not stored"
+        f"The lease limits yearly CAM increases to {cap_display}. That limit was not "
+        f"used here because the base-year tenant CAM amount (the starting number the "
+        f"{cap_display} is applied to) is not on this file."
     )
 
 
@@ -502,15 +508,19 @@ class CAMReconciliationPDFReport:
                 "The annual increase cap binds after exclusions and reduces the tenant share further."
             )
         elif cam_provisions.get("has_cam_cap") or cam_provisions.get("cam_cap_percentage"):
+            cap = cam_provisions.get("cam_cap_percentage")
+            cap_display = f"{cap:g}%" if cap not in (None, "") else "a set percentage"
             if cam_provisions.get("cam_base_amount"):
                 findings.append(
-                    "The annual increase cap was tested against the CAM Base Amount and does not bind "
-                    "after excluded costs are removed."
+                    f"The lease limits yearly CAM increases to {cap_display} above the "
+                    f"base-year tenant CAM amount. The allowed share is under that ceiling, "
+                    f"so the cap does not change this year's total."
                 )
             else:
                 findings.append(
-                    "The lease has an annual increase cap, but it was not applied because "
-                    "CAM Base Amount was not stored."
+                    f"The lease limits yearly CAM increases to {cap_display}. That limit "
+                    f"was not used because the base-year tenant CAM amount is not on this "
+                    f"file. The overcharge is from lease-excluded costs, then the tenant's share."
                 )
         elements.append(Paragraph("KEY FINDINGS", self.styles["SectionHead"]))
         for finding in findings:
@@ -521,9 +531,9 @@ class CAMReconciliationPDFReport:
         elements = [Paragraph("HOW THE TENANT SHARE WAS CALCULATED", self.styles["SectionHead"])]
         elements.append(Paragraph(
             "LeaseAI applies the lease in this order: drop excluded building costs, multiply "
-            "the remainder by the tenant's pro-rata share, then apply any CAM stop or annual "
-            "increase cap. The cap is measured against the stored CAM Base Amount, never against "
-            "this year's billed share.",
+            "the remainder by the tenant's share of the building, then apply any CAM stop or "
+            "yearly increase cap. A yearly cap is measured against the base-year tenant CAM "
+            "amount, never against this year's billed share.",
             self.styles["BodyNormal"],
         ))
         elements.append(Spacer(1, 0.08 * inch))
@@ -581,7 +591,6 @@ class CAMReconciliationPDFReport:
         elements = [Paragraph("CATEGORY ROLLFORWARD", self.styles["SectionHead"])]
         header = [
             Paragraph("<b>Category</b>", self.styles["HeaderCell"]),
-            Paragraph("<b>Lines</b>", self.styles["HeaderCellRight"]),
             Paragraph("<b>Billed</b>", self.styles["HeaderCellRight"]),
             Paragraph("<b>Challenged</b>", self.styles["HeaderCellRight"]),
             Paragraph("<b>Allowed</b>", self.styles["HeaderCellRight"]),
@@ -592,12 +601,11 @@ class CAMReconciliationPDFReport:
             allowed = data["amount"] - data["challenged"]
             rows.append([
                 Paragraph(_xml(label), self.styles["TableCell"]),
-                Paragraph(str(data["count"]), self.styles["TableCellRight"]),
                 Paragraph(_money(data["amount"]), self.styles["TableCellRight"]),
                 Paragraph(_money(data["challenged"]), self.styles["TableCellRight"]),
                 Paragraph(_money(allowed), self.styles["TableCellRight"]),
             ])
-        table = Table(rows, colWidths=[2.1 * inch, 0.7 * inch, 1.3 * inch, 1.3 * inch, 1.3 * inch])
+        table = Table(rows, colWidths=[2.5 * inch, 1.4 * inch, 1.4 * inch, 1.4 * inch])
         table.setStyle(self._grid_style(len(rows)))
         elements.append(table)
         return elements
