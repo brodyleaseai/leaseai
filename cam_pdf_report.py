@@ -370,6 +370,10 @@ class CAMReconciliationPDFReport:
         challenged = [item for item in line_items if item.get("should_challenge")]
         overcharged = variance > 0.01
         credited = variance < -0.01
+        paid = reconciliation.get("estimated_cam_paid")
+        remaining = reconciliation.get("lease_remaining_due")
+        landlord_trueup = reconciliation.get("landlord_trueup_billed")
+        has_paid = paid not in (None, "")
 
         if abs(variance) < 100:
             status = "ACCEPT"
@@ -385,12 +389,37 @@ class CAMReconciliationPDFReport:
             status_bg = RED_BG
             status_fg = RED_FG
             status_hex = "#b71c1c"
-            direction = "overcharge" if overcharged else "credit"
-            rec = (
-                f"Do not pay the {direction} of {_money(abs(variance))} until the landlord "
-                f"removes lease-excluded costs and recasts the tenant share. Attach this "
-                f"workpaper to the dispute letter or accountant review."
-            )
+            if has_paid:
+                if remaining is not None and remaining > 0.01:
+                    rec = (
+                        f"The landlord's true-up asks for {_money(landlord_trueup)} after "
+                        f"{_money(paid)} already paid this year. Under the lease, the remaining "
+                        f"amount due is {_money(remaining)}. Do not pay the extra "
+                        f"{_money(abs(variance))} until lease-excluded costs are removed and the "
+                        f"tenant share is recast. Attach this workpaper to the dispute letter "
+                        f"or accountant review."
+                    )
+                elif remaining is not None and remaining < -0.01:
+                    rec = (
+                        f"The landlord's true-up asks for {_money(landlord_trueup)} after "
+                        f"{_money(paid)} already paid this year. Under the lease, estimated "
+                        f"payments already cover the allowed share; the tenant is owed a credit "
+                        f"of {_money(abs(remaining))}. Do not pay the true-up. Attach this "
+                        f"workpaper to the dispute letter or accountant review."
+                    )
+                else:
+                    rec = (
+                        f"Estimated CAM paid this year ({_money(paid)}) already matches the "
+                        f"amount allowed by the lease. Do not pay the landlord's true-up of "
+                        f"{_money(landlord_trueup)}."
+                    )
+            else:
+                direction = "overcharge" if overcharged else "credit"
+                rec = (
+                    f"Do not pay the {direction} of {_money(abs(variance))} until the landlord "
+                    f"removes lease-excluded costs and recasts the tenant share. Attach this "
+                    f"workpaper to the dispute letter or accountant review."
+                )
 
         variance_label = "Overcharge" if overcharged else ("Credit due tenant" if credited else "Variance")
         elements = [
@@ -481,10 +510,40 @@ class CAMReconciliationPDFReport:
                 ),
             ],
         ]
+        if has_paid:
+            remaining_label = (
+                "Credit due tenant"
+                if remaining is not None and remaining < -0.01
+                else "Remaining due under lease"
+            )
+            remaining_display = _money(abs(remaining) if remaining is not None else 0)
+            summary_rows.extend(
+                [
+                    [
+                        Paragraph("Estimated CAM paid this year", self.styles["TableCell"]),
+                        Paragraph("—", self.styles["TableCellRight"]),
+                        Paragraph(_money(paid), self.styles["TableCellRight"]),
+                    ],
+                    [
+                        Paragraph("Landlord true-up billed", self.styles["TableCell"]),
+                        Paragraph("—", self.styles["TableCellRight"]),
+                        Paragraph(_money(landlord_trueup), self.styles["TableCellRight"]),
+                    ],
+                    [
+                        Paragraph(remaining_label, self.styles["TableCellBold"]),
+                        Paragraph("—", self.styles["TableCellRight"]),
+                        Paragraph(f"<b>{remaining_display}</b>", self.styles["TableCellRight"]),
+                    ],
+                ]
+            )
         summary = Table(summary_rows, colWidths=[3.3 * inch, 1.7 * inch, 1.7 * inch])
         summary.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), NAVY),
-            ("BACKGROUND", (0, -1), (-1, -1), RED_BG if overcharged else GREEN_BG),
+            ("BACKGROUND", (0, -1), (-1, -1), (
+                GREEN_BG if (has_paid and remaining is not None and remaining <= 0.01)
+                else RED_BG if overcharged or (has_paid and remaining is not None and remaining > 0.01)
+                else GREEN_BG
+            )),
             ("GRID", (0, 0), (-1, -1), 0.4, GRID),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -503,6 +562,19 @@ class CAMReconciliationPDFReport:
                 f"Excluded building costs of {_money(excluded)} are not CAM and are stripped "
                 f"before applying the tenant's {_share_pct(cam_provisions.get('tenant_prorata_share'))} share."
             )
+        if has_paid:
+            if remaining is not None and remaining < -0.01:
+                findings.append(
+                    f"Estimated CAM of {_money(paid)} was already paid this year, which is "
+                    f"{_money(abs(remaining))} more than the allowed tenant share. The "
+                    f"landlord's true-up of {_money(landlord_trueup)} should not be paid."
+                )
+            else:
+                findings.append(
+                    f"Estimated CAM of {_money(paid)} was already paid this year. After the "
+                    f"lease-correct share, {_money(remaining)} remains due — not the "
+                    f"landlord's true-up of {_money(landlord_trueup)}."
+                )
         if reconciliation.get("cam_cap_applied"):
             findings.append(
                 "The annual increase cap binds after exclusions and reduces the tenant share further."

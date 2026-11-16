@@ -249,6 +249,7 @@ class StatementParseTests(unittest.TestCase):
         self.assertEqual(defaults["statement_date"].isoformat(), "2026-03-15")
         self.assertEqual(defaults["landlord_total"], 1200000.00)
         self.assertEqual(defaults["tenant_share_billed"], 150000.00)
+        self.assertEqual(defaults["estimated_cam_paid"], 108000.00)
 
     def test_five_planted_exclusions_are_challenged(self):
         analyzed = analyze_line_items(self.parsed["line_items"], S.PROVISIONS_FOR_ENGINE)
@@ -264,6 +265,7 @@ def _northridge_workpaper_bytes():
         S.TENANT_SHARE_BILLED,
         S.PROVISIONS_FOR_ENGINE,
         parsed["line_items"],
+        parsed.get("estimated_cam_paid"),
     )
     provisions = dict(S.PROVISIONS_FOR_ENGINE)
     provisions.update({
@@ -289,6 +291,9 @@ def _northridge_workpaper_bytes():
         "excluded_building_charges": result["excluded_building_charges"],
         "allowable_building_charges": result["allowable_building_charges"],
         "cam_cap_applied": result.get("cam_cap_applied"),
+        "estimated_cam_paid": result.get("estimated_cam_paid"),
+        "landlord_trueup_billed": result.get("landlord_trueup_billed"),
+        "lease_remaining_due": result.get("lease_remaining_due"),
     }
     return generate_cam_pdf_report(
         lease_data,
@@ -566,6 +571,88 @@ class IronwoodEngineMathTests(unittest.TestCase):
         self.assertEqual(defaults["statement_date"].isoformat(), "2025-02-28")
         self.assertEqual(defaults["landlord_total"], 723000.00)
         self.assertEqual(defaults["tenant_share_billed"], 144600.00)
+        self.assertEqual(defaults["estimated_cam_paid"], 84000.00)
+
+    def test_remaining_due_after_estimates_without_cap(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        provisions = dict(IW.PROVISIONS_FOR_ENGINE)
+        provisions["cam_base_amount"] = None
+        provisions["has_cam_cap"] = False
+        provisions["cam_cap_percentage"] = None
+        result = reconcile_cam_charges(
+            IW.BUILDING_TOTAL_CHARGES,
+            IW.TENANT_SHARE_BILLED,
+            provisions,
+            parsed["line_items"],
+            parsed["estimated_cam_paid"],
+        )
+        self.assertEqual(result["calculated_tenant_share"], 100000.00)
+        self.assertEqual(result["estimated_cam_paid"], 84000.00)
+        self.assertEqual(result["landlord_trueup_billed"], 60600.00)
+        self.assertEqual(result["lease_remaining_due"], 16000.00)
+
+    def test_cap_leaves_a_credit_after_estimates_paid(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        result = reconcile_cam_charges(
+            IW.BUILDING_TOTAL_CHARGES,
+            IW.TENANT_SHARE_BILLED,
+            IW.PROVISIONS_FOR_ENGINE,
+            parsed["line_items"],
+            parsed["estimated_cam_paid"],
+        )
+        self.assertEqual(result["calculated_tenant_share"], 83200.00)
+        self.assertEqual(result["lease_remaining_due"], -800.00)
+
+    def test_abstract_exclusions_flag_lines_without_saved_cam_provisions(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        provisions = enrich_cam_provisions(
+            {},
+            {"CAM Exclusions": IW.CAM_EXCLUSIONS_CLAUSE},
+        )
+        analyzed = analyze_line_items(parsed["line_items"], provisions)
+        challenged = [item for item in analyzed if item["should_challenge"]]
+        self.assertEqual(len(challenged), 4)
+
+    def test_workpaper_shows_remaining_due_after_estimates(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        provisions = dict(IW.PROVISIONS_FOR_ENGINE)
+        provisions["cam_base_amount"] = None
+        result = reconcile_cam_charges(
+            IW.BUILDING_TOTAL_CHARGES,
+            IW.TENANT_SHARE_BILLED,
+            provisions,
+            parsed["line_items"],
+            parsed["estimated_cam_paid"],
+        )
+        pdf_bytes = generate_cam_pdf_report(
+            {
+                "property_address": IW.PROPERTY_ADDRESS,
+                "tenant_name": IW.TENANT_NAME,
+                "landlord_name": IW.LANDLORD_NAME,
+            },
+            {
+                "reconciliation_year": IW.RECONCILIATION_YEAR,
+                "statement_date": IW.STATEMENT_DATE,
+                "landlord_total_charges": IW.BUILDING_TOTAL_CHARGES,
+                "landlord_tenant_share": IW.TENANT_SHARE_BILLED,
+                "calculated_tenant_share": result["calculated_tenant_share"],
+                "variance_amount": result["variance_amount"],
+                "excluded_building_charges": result["excluded_building_charges"],
+                "allowable_building_charges": result["allowable_building_charges"],
+                "estimated_cam_paid": result["estimated_cam_paid"],
+                "landlord_trueup_billed": result["landlord_trueup_billed"],
+                "lease_remaining_due": result["lease_remaining_due"],
+            },
+            result["analyzed_line_items"],
+            provisions,
+        )
+        text = _pdf_text_from_bytes(pdf_bytes)
+        self.assertIn("84,000.00", text)
+        self.assertIn("60,600.00", text)
+        self.assertIn("16,000.00", text)
+        self.assertIn("Remaining due under lease", text)
+        self.assertIn("already paid this year", text)
+        self.assertGreaterEqual(text.count("Challenge"), 4)
 
 
 if __name__ == "__main__":

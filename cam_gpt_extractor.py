@@ -10,6 +10,7 @@ This module handles:
 
 import os
 import json
+from datetime import datetime
 from typing import Dict, List, Optional
 import openai
 
@@ -151,6 +152,7 @@ Return ONLY a JSON object:
   "period_year": integer (e.g., 2024),
   "total_building_charges": number,
   "tenant_share_billed": number or null,
+  "estimated_cam_paid": number or null,
   "line_items": [
     {
       "line_number": 1,
@@ -276,8 +278,18 @@ def save_cam_provisions_to_db(lease_id: str, provisions: Dict, supabase_client):
             'has_cam_cap': provisions.get('has_cam_cap', False),
             'cam_cap_percentage': provisions.get('cam_cap_percentage'),
             'cam_cap_amount': None,  # Can be calculated from base * percentage
-            'excluded_items': provisions.get('cam_exclusions', []),
-            'exclusions_description': ', '.join(provisions.get('cam_exclusions', [])) if provisions.get('cam_exclusions') else None,
+            'excluded_items': (
+                provisions.get('excluded_items')
+                or provisions.get('cam_exclusions')
+                or []
+            ),
+            'exclusions_description': (
+                provisions.get('exclusions_description')
+                or (
+                    ', '.join(provisions.get('cam_exclusions', []))
+                    if provisions.get('cam_exclusions') else None
+                )
+            ),
             'cam_payment_frequency': provisions.get('cam_payment_frequency'),
             'cam_reconciliation_deadline': provisions.get('reconciliation_deadline'),
             'tenant_audit_right': provisions.get('tenant_audit_right', False),

@@ -163,11 +163,13 @@ def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, la
     provisions = enrich_cam_provisions(cam_provisions, load_extracted_field_map(lease_id))
     parsed = st.session_state.get("parsed_cam_statement") or {}
     line_items = parsed.get("line_items") or []
+    estimated_paid = parsed.get("estimated_cam_paid")
     calc_result = reconcile_cam_charges(
         landlord_total,
         tenant_share_billed,
         provisions,
         line_items,
+        estimated_paid,
     )
     calculated_share = calc_result["calculated_tenant_share"]
     variance = tenant_share_billed - calculated_share
@@ -188,6 +190,9 @@ def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, la
         "excluded_building_charges": calc_result.get("excluded_building_charges") or 0,
         "allowable_building_charges": calc_result.get("allowable_building_charges"),
         "cam_cap_applied": calc_result.get("cam_cap_applied"),
+        "estimated_cam_paid": calc_result.get("estimated_cam_paid"),
+        "landlord_trueup_billed": calc_result.get("landlord_trueup_billed"),
+        "lease_remaining_due": calc_result.get("lease_remaining_due"),
         "provisions_used": provisions,
         "analyzed_line_items": calc_result.get("analyzed_line_items") or [],
     }
@@ -246,6 +251,9 @@ def build_cam_report(results):
         "excluded_building_charges": results.get("excluded_building_charges") or 0,
         "allowable_building_charges": results.get("allowable_building_charges"),
         "cam_cap_applied": results.get("cam_cap_applied"),
+        "estimated_cam_paid": results.get("estimated_cam_paid"),
+        "landlord_trueup_billed": results.get("landlord_trueup_billed"),
+        "lease_remaining_due": results.get("lease_remaining_due"),
     }
     pdf_bytes = generate_cam_pdf_report(lease_data, recon_data, line_items, provisions)
     filename = cam_report_filename(lease_data, results["recon_year"])
@@ -496,15 +504,13 @@ with tab2:
                                     if provisions.get('error'):
                                         st.error(f"Extraction failed: {provisions['error']}")
                                     else:
-                                        # Save to database
+                                        provisions = enrich_cam_provisions(
+                                            provisions,
+                                            load_extracted_field_map(selected_lease_id),
+                                        )
                                         if save_cam_provisions_to_db(selected_lease_id, provisions, sb):
                                             st.success("✅ CAM provisions extracted and saved!")
-                                            st.balloons()
-                                            st.info("Refresh the page to see the extracted provisions.")
-                                            
-                                            # Show extracted data
-                                            with st.expander("📋 View Extracted Provisions"):
-                                                st.json(provisions)
+                                            st.rerun()
                                         else:
                                             st.error("Failed to save provisions to database")
                                 else:
@@ -578,7 +584,11 @@ with tab2:
             
             if line_items:
                 st.markdown("### 📊 Extracted Line Items")
-                analyzed_items = analyze_line_items(line_items, cam_provisions or {})
+                flag_provisions = enrich_cam_provisions(
+                    cam_provisions or {},
+                    load_extracted_field_map(selected_lease_id),
+                )
+                analyzed_items = analyze_line_items(line_items, flag_provisions)
                 challenged = [item for item in analyzed_items if item.get("should_challenge")]
                 st.write(f"**Total items:** {len(analyzed_items)}")
                 if challenged:
@@ -586,7 +596,7 @@ with tab2:
                         f"{len(challenged)} line item(s) look excluded under this lease "
                         f"(capital, structural, legal, depreciation, or debt service)."
                     )
-                elif not cam_provisions:
+                elif not (flag_provisions.get("excluded_items") or flag_provisions.get("exclusions_description")):
                     st.caption("Extract CAM provisions on this lease to flag excluded rows here.")
                 
                 import pandas as pd
@@ -598,7 +608,7 @@ with tab2:
                         "Description": item.get("description"),
                         "Category": item.get("category"),
                         "Amount": f"${float(amount):,.2f}",
-                        "Flag": "Challenge" if item.get("should_challenge") else "OK",
+                        "Flag": "Challenge" if item.get("should_challenge") else "Allow",
                         "Reason": item.get("dispute_reason") or "",
                     })
                 df = pd.DataFrame(rows)
@@ -738,6 +748,23 @@ with tab2:
                 st.warning("⚠️ Moderate variance found (< $500). Recommended action: REQUEST CLARIFICATION")
             else:
                 st.error(f"🚨 Significant overcharge found: {format_currency(abs(variance))}. Recommended action: CHALLENGE")
+
+            remaining = results.get("lease_remaining_due")
+            paid = results.get("estimated_cam_paid")
+            if paid not in (None, ""):
+                col_paid, col_trueup, col_remain = st.columns(3)
+                with col_paid:
+                    st.metric("Estimated CAM already paid", format_currency(paid))
+                with col_trueup:
+                    st.metric(
+                        "Landlord true-up billed",
+                        format_currency(results.get("landlord_trueup_billed") or 0),
+                    )
+                with col_remain:
+                    if remaining is not None and remaining < 0:
+                        st.metric("Credit due tenant", format_currency(abs(remaining)))
+                    else:
+                        st.metric("Remaining due under lease", format_currency(remaining or 0))
 
             steps = results.get("calculations") or []
             if steps:
