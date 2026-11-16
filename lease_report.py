@@ -16,6 +16,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
+from computed_rent_schedule import (
+    META_KEY,
+    apply_computed_rent_schedule,
+    is_hidden_schedule_key,
+    is_meta_key,
+)
 from report_sources import field_source, format_source_html, source_exhibit_rows
 
 
@@ -55,8 +61,8 @@ def _confidence_color(conf):
         conf_upper = conf.upper()
         if conf_upper == "HIGH":
             return "#00C853"  # Green
-        elif conf_upper == "MEDIUM":
-            return "#FFB300"  # Amber
+        elif conf_upper in ["MEDIUM", "COMPUTED"]:
+            return "#FFB300" if conf_upper == "MEDIUM" else "#1565C0"
         elif conf_upper in ["LOW", "NOT_FOUND"]:
             return "#D50000"  # Red
         else:
@@ -106,6 +112,86 @@ def _header_footer(canvas_obj, doc):
     canvas_obj.restoreState()
 
 
+def _computed_rent_schedule_flowables(
+    extracted_fields,
+    heading_style,
+    cite_style,
+    header_style,
+    field_name_style,
+    cell_style,
+    source_style,
+):
+    """Client workpaper: calculated rent through expiration, separate from extracted fields."""
+    meta = (extracted_fields or {}).get(META_KEY) or {}
+    flowables = []
+    flowables.append(Paragraph("Computed Rent Schedule", heading_style))
+    if not meta.get("computed"):
+        reason = meta.get("reason") or (
+            "LeaseAI did not expand a year-by-year rent table from these terms."
+        )
+        flowables.append(Paragraph(html.escape(reason), cite_style))
+        flowables.append(Spacer(1, 0.25 * inch))
+        return flowables
+
+    flowables.append(
+        Paragraph(
+            "These amounts are calculated by LeaseAI from the extracted Year 1 rent and "
+            "the fixed annual increase. They are not quoted from a year-by-year exhibit. "
+            f"Method: {html.escape(meta.get('method') or '')}.",
+            cite_style,
+        )
+    )
+    flowables.append(Spacer(1, 0.12 * inch))
+    rows = [
+        [
+            Paragraph("Year", header_style),
+            Paragraph("Period", header_style),
+            Paragraph("Monthly", header_style),
+            Paragraph("Period total", header_style),
+            Paragraph("Basis", header_style),
+        ]
+    ]
+    for row in meta.get("rows") or []:
+        rows.append(
+            [
+                Paragraph(str(row.get("year") or ""), cell_style),
+                Paragraph(html.escape(str(row.get("period") or "")), cell_style),
+                Paragraph(html.escape(str(row.get("monthly_display") or "")), cell_style),
+                Paragraph(html.escape(str(row.get("annual_display") or "")), cell_style),
+                Paragraph(html.escape(str(row.get("basis") or "")), field_name_style),
+            ]
+        )
+    table = Table(
+        rows,
+        colWidths=[0.6 * inch, 2.3 * inch, 1.15 * inch, 1.25 * inch, 1.0 * inch],
+        repeatRows=1,
+    )
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1565C0")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#90CAF9")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+    ]
+    for index, row in enumerate(meta.get("rows") or [], start=1):
+        if str(row.get("basis") or "") == "Calculated":
+            style_cmds.append(
+                ("BACKGROUND", (0, index), (-1, index), colors.HexColor("#E3F2FD"))
+            )
+        else:
+            style_cmds.append(
+                ("BACKGROUND", (0, index), (-1, index), colors.HexColor("#E8F5E9"))
+            )
+    table.setStyle(TableStyle(style_cmds))
+    flowables.append(table)
+    flowables.append(Spacer(1, 0.25 * inch))
+    return flowables
+
+
 def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> bytes:
     """
     Generate a comprehensive PDF lease abstract report.
@@ -117,6 +203,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     Returns:
         PDF content as bytes
     """
+    extracted_fields = apply_computed_rent_schedule(extracted_fields)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -196,12 +283,16 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     story.append(Spacer(1, 0.35 * inch))
     
     # Calculate confidence statistics (moved before page break)
-    total_fields = len(extracted_fields)
+    visible_fields = {
+        name: info for name, info in extracted_fields.items()
+        if not is_hidden_schedule_key(name)
+    }
+    total_fields = len(visible_fields)
     high_count = 0
     medium_count = 0
     low_count = 0
     
-    for field_info in extracted_fields.values():
+    for field_info in visible_fields.values():
         if isinstance(field_info, dict):
             confidence = field_info.get("confidence", None)
             if isinstance(confidence, str):
@@ -347,6 +438,8 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     )
 
     for field_name, field_info in extracted_fields.items():
+        if is_hidden_schedule_key(field_name):
+            continue
         if isinstance(field_info, dict):
             value = field_info.get("value", "NOT FOUND")
             confidence = field_info.get("confidence", None)
@@ -413,6 +506,15 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     story.append(fields_table)
     story.append(Spacer(1, 0.35 * inch))
+    story.extend(_computed_rent_schedule_flowables(
+        extracted_fields,
+        heading_style,
+        cite_style,
+        header_style,
+        field_name_style,
+        cell_style,
+        source_style,
+    ))
 
     story.append(Paragraph("Source Exhibit — where each extraction came from", heading_style))
     story.append(
@@ -430,6 +532,8 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     ]
     exhibit_rows = [exhibit_header]
     for row in source_exhibit_rows(extracted_fields, default_document="Original lease"):
+        if is_meta_key(row["field_name"]):
+            continue
         page_bit = f", p. {row['page']}" if row["page"] not in {"", "—"} else ""
         derived = f"<br/>Derived from {row['derived_from']}" if row["derived_from"] else ""
         exhibit_rows.append(

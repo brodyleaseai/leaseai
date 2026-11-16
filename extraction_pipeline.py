@@ -378,7 +378,9 @@ IMPORTANT INSTRUCTIONS:
 - If a field is genuinely not mentioned in the lease, mark it as "NOT FOUND" with LOW confidence
 - Use exact dates in YYYY-MM-DD format
 - Include units for all measurements (sq ft, months, %, $, etc.)
-- For rent schedules, show the exact monthly amount and ALL rent periods/years if escalating
+- For Base Rent Year 2-5 (monthly): copy a monthly dollar amount ONLY if that year's rent is written as a number in the lease. Do not calculate escalations. If the lease only gives a formula (for example "increasing 2.5% annually"), set Year 2-5 to NOT FOUND with LOW confidence
+- For Full Rent Schedule (all years): quote the schedule or formula exactly as written. Do not expand it into calculated years
+- HIGH confidence is only for values copied from the document. Calculated figures are produced later by LeaseAI, not by this extraction
 - For responsibilities, specify "Landlord", "Tenant", or "Shared"
 - Extract COMPLETE clauses - do not truncate mid-sentence
 - Be thorough but precise - don't invent information
@@ -433,7 +435,8 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                 response_text = response_text[json_start:json_end].strip()
             
             extracted_fields = json.loads(response_text)
-            
+            from computed_rent_schedule import apply_computed_rent_schedule
+            extracted_fields = apply_computed_rent_schedule(extracted_fields)
             return extracted_fields
         
         except json.JSONDecodeError as e:
@@ -454,6 +457,7 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         confidence_map = {
             "HIGH": 0.95,
             "MEDIUM": 0.75,
+            "COMPUTED": 0.80,
             "LOW": 0.45,
             "NOT_FOUND": 0.0,
         }
@@ -601,6 +605,8 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
         print(f"[5/6] Saving extracted fields to database...")
         field_number = 1
         for field_name, field_data in extracted_fields.items():
+            if str(field_name).startswith("_"):
+                continue
             if isinstance(field_data, dict):
                 value = field_data.get("value", "NOT FOUND")
                 confidence_str = field_data.get("confidence", "LOW")
@@ -609,6 +615,9 @@ CRITICAL: Return ONLY the JSON object, no additional text or explanation.
                     field_data.get("source_page"),
                 )
                 notes = field_data.get("notes", "")
+                derived = field_data.get("derived_from") or ""
+                if derived and "Derived from" not in notes:
+                    notes = f"{notes}\nDerived from {derived}".strip()
             else:
                 value = str(field_data)
                 confidence_str = "LOW"
