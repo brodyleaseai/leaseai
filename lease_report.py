@@ -20,7 +20,6 @@ from computed_rent_schedule import (
     META_KEY,
     apply_computed_rent_schedule,
     is_hidden_schedule_key,
-    is_meta_key,
 )
 from report_sources import field_source, format_source_html, source_exhibit_rows
 
@@ -124,20 +123,16 @@ def _computed_rent_schedule_flowables(
     """Client workpaper: calculated rent through expiration, separate from extracted fields."""
     meta = (extracted_fields or {}).get(META_KEY) or {}
     flowables = []
-    flowables.append(Paragraph("Computed Rent Schedule", heading_style))
-    if not meta.get("computed"):
-        reason = meta.get("reason") or (
-            "LeaseAI did not expand a year-by-year rent table from these terms."
-        )
-        flowables.append(Paragraph(html.escape(reason), cite_style))
-        flowables.append(Spacer(1, 0.25 * inch))
+    if not meta.get("computed") or not (meta.get("rows") or []):
         return flowables
 
+    flowables.append(Paragraph("Base Rent Schedule", heading_style))
     flowables.append(
         Paragraph(
-            "These amounts are calculated by LeaseAI from the extracted Year 1 rent and "
-            "the fixed annual increase. They are not quoted from a year-by-year exhibit. "
-            f"Method: {html.escape(meta.get('method') or '')}.",
+            "Year 1 rent is quoted from the lease. Later years are calculated by LeaseAI "
+            "from that starting rent and the stated annual increase — they are not copied "
+            "from a year-by-year exhibit. "
+            f"{html.escape(meta.get('method') or '')}.",
             cite_style,
         )
     )
@@ -274,9 +269,10 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     )
     story.append(
         Paragraph(
-            "Each extracted value is cited to the source document text. "
-            "The Source Exhibit at the end of this abstract is the workpaper "
-            "an auditor, lender, or buyer can attach.",
+            "Quoted values are cited to the source document. Where the lease states "
+            "a formula instead of a year-by-year rent exhibit, LeaseAI calculates "
+            "the schedule and labels those figures Calculated. The Source Exhibit "
+            "at the end is the workpaper an auditor, lender, or buyer can attach.",
             cite_style,
         )
     )
@@ -289,6 +285,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     }
     total_fields = len(visible_fields)
     high_count = 0
+    calculated_count = 0
     medium_count = 0
     low_count = 0
     
@@ -299,6 +296,8 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
                 conf_upper = confidence.upper()
                 if conf_upper == "HIGH":
                     high_count += 1
+                elif conf_upper == "COMPUTED":
+                    calculated_count += 1
                 elif conf_upper == "MEDIUM":
                     medium_count += 1
                 elif conf_upper in ["LOW", "NOT_FOUND"]:
@@ -313,6 +312,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
                     low_count += 1
     
     high_pct = (high_count / total_fields * 100) if total_fields > 0 else 0
+    calculated_pct = (calculated_count / total_fields * 100) if total_fields > 0 else 0
     medium_pct = (medium_count / total_fields * 100) if total_fields > 0 else 0
     low_pct = (low_count / total_fields * 100) if total_fields > 0 else 0
     
@@ -340,6 +340,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         [""],  # Spacer
         [Paragraph("<b>Confidence Distribution:</b>", summary_style)],
         [Paragraph(f"<font color='#1B5E20'>● HIGH:</font> {high_count} fields ({high_pct:.1f}%)", summary_style)],
+        [Paragraph(f"<font color='#0D47A1'>● CALCULATED:</font> {calculated_count} fields ({calculated_pct:.1f}%)", summary_style)],
         [Paragraph(f"<font color='#F57F17'>● MEDIUM:</font> {medium_count} fields ({medium_pct:.1f}%)", summary_style)],
         [Paragraph(f"<font color='#B71C1C'>● LOW / NOT FOUND:</font> {low_count} fields ({low_pct:.1f}%)", summary_style)],
     ]
@@ -373,11 +374,12 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         
         # Distribution rows
         ("BACKGROUND", (0, 4), (0, 4), colors.HexColor("#E8F5E9")),
-        ("BACKGROUND", (0, 5), (0, 5), colors.HexColor("#FFF8E1")),
-        ("BACKGROUND", (0, 6), (0, 6), colors.HexColor("#FFEBEE")),
-        ("ALIGN", (0, 4), (0, 6), "LEFT"),
-        ("TOPPADDING", (0, 4), (0, 6), 6),
-        ("BOTTOMPADDING", (0, 4), (0, 6), 6),
+        ("BACKGROUND", (0, 5), (0, 5), colors.HexColor("#E3F2FD")),
+        ("BACKGROUND", (0, 6), (0, 6), colors.HexColor("#FFF8E1")),
+        ("BACKGROUND", (0, 7), (0, 7), colors.HexColor("#FFEBEE")),
+        ("ALIGN", (0, 4), (0, 7), "LEFT"),
+        ("TOPPADDING", (0, 4), (0, 7), 6),
+        ("BOTTOMPADDING", (0, 4), (0, 7), 6),
         
         # All rows
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#90CAF9")),
@@ -388,12 +390,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     story.append(summary_table)
     story.append(PageBreak())
-    
-    # Extracted Fields Section (now on page 2)
-    story.append(Paragraph("Extracted Lease Data", heading_style))
-    story.append(Spacer(1, 0.25 * inch))
-    
-    # Build field rows with proper header styling
+
     header_style = ParagraphStyle(
         'HeaderStyle',
         parent=styles['Normal'],
@@ -437,6 +434,18 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         alignment=TA_LEFT,
     )
 
+    story.extend(_computed_rent_schedule_flowables(
+        extracted_fields,
+        heading_style,
+        cite_style,
+        header_style,
+        field_name_style,
+        cell_style,
+        source_style,
+    ))
+    story.append(Paragraph("Extracted Lease Data", heading_style))
+    story.append(Spacer(1, 0.25 * inch))
+
     for field_name, field_info in extracted_fields.items():
         if is_hidden_schedule_key(field_name):
             continue
@@ -449,6 +458,8 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         source = field_source(field_info, default_document="Original lease")
         
         display_value = html.escape(str(value) if value else "NOT FOUND")
+        if str(confidence or "").upper() == "COMPUTED":
+            display_value = f"Calculated: {display_value}"
         
         # Use Paragraph for automatic text wrapping
         field_name_para = Paragraph(html.escape(field_name.replace("_", " ").title()), field_name_style)
@@ -506,15 +517,6 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     story.append(fields_table)
     story.append(Spacer(1, 0.35 * inch))
-    story.extend(_computed_rent_schedule_flowables(
-        extracted_fields,
-        heading_style,
-        cite_style,
-        header_style,
-        field_name_style,
-        cell_style,
-        source_style,
-    ))
 
     story.append(Paragraph("Source Exhibit — where each extraction came from", heading_style))
     story.append(
@@ -532,7 +534,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     ]
     exhibit_rows = [exhibit_header]
     for row in source_exhibit_rows(extracted_fields, default_document="Original lease"):
-        if is_meta_key(row["field_name"]):
+        if is_hidden_schedule_key(row["field_name"]):
             continue
         page_bit = f", p. {row['page']}" if row["page"] not in {"", "—"} else ""
         derived = f"<br/>Derived from {row['derived_from']}" if row["derived_from"] else ""

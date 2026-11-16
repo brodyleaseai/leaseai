@@ -109,11 +109,11 @@ class IronwoodPlanTests(unittest.TestCase):
         self.assertIn("2.5%", plan["method"])
         self.assertIn("rent commencement", plan["method"])
 
-    def test_invented_year_two_is_demoted_and_schedule_field_is_added(self):
+    def test_unstated_year_two_is_filled_as_calculated(self):
         updated = apply_computed_rent_schedule(_ironwood_fields())
         year2 = updated["Base Rent Year 2 (monthly)"]
-        self.assertEqual(year2["value"], "Not stated in the lease")
-        self.assertEqual(year2["confidence"], "LOW")
+        self.assertEqual(year2["value"], "$19,133.34")
+        self.assertEqual(year2["confidence"], "COMPUTED")
         self.assertIn("Base Rent Year 1", year2["derived_from"])
         self.assertIn(
             "Year 1 $224,000.00, increasing 2.5% annually",
@@ -121,6 +121,21 @@ class IronwoodPlanTests(unittest.TestCase):
         )
         self.assertIn("Year 10 |", updated[COMPUTED_FIELD]["value"])
         self.assertEqual(updated[COMPUTED_FIELD]["confidence"], "COMPUTED")
+        self.assertEqual(len(updated[META_KEY]["rows"]), 10)
+
+    def test_not_found_years_are_filled_from_year_one_formula(self):
+        fields = _ironwood_fields()
+        for year in range(2, 6):
+            fields[f"Base Rent Year {year} (monthly)"] = {
+                "value": "NOT FOUND",
+                "confidence": "LOW",
+                "source_snippet": "",
+            }
+        updated = apply_computed_rent_schedule(fields)
+        self.assertEqual(updated["Base Rent Year 2 (monthly)"]["value"], "$19,133.34")
+        self.assertEqual(updated["Base Rent Year 2 (monthly)"]["confidence"], "COMPUTED")
+        self.assertEqual(updated["Base Rent Year 5 (monthly)"]["confidence"], "COMPUTED")
+        self.assertTrue(updated[META_KEY]["computed"])
         self.assertEqual(len(updated[META_KEY]["rows"]), 10)
 
     def test_stated_year_two_stays_extracted(self):
@@ -169,13 +184,37 @@ class AbstractPdfTests(unittest.TestCase):
         )
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         text = _pdf_text(pdf_bytes)
-        self.assertIn("Computed Rent Schedule", text)
+        self.assertIn("Base Rent Schedule", text)
         self.assertIn("19,133.34", text)
         self.assertIn("Calculated", text)
-        self.assertIn("Not stated in the lease", text)
+        self.assertIn("Calculated: $19,133.34", text)
+        self.assertNotIn("Not stated in the lease", text)
         self.assertIn("Apr 1, 2031", text)
         self.assertIn("2.5%", text)
         self.assertNotIn("$19,133.33", text)
+        self.assertNotRegex(text, r"Base Rent Year 2 \(Monthly\)\s+NOT FOUND")
+
+    def test_pdf_fills_not_found_year_slots_from_report_two(self):
+        fields = _ironwood_fields()
+        for year in range(2, 6):
+            fields[f"Base Rent Year {year} (monthly)"] = {
+                "value": "NOT FOUND",
+                "confidence": "LOW",
+                "source_snippet": "",
+            }
+        text = _pdf_text(generate_lease_abstract_pdf(
+            {
+                "property_address": "4800 East Colfax Avenue, Denver, Colorado 80220",
+                "tenant_name": "Pinnacle Grocery Company",
+            },
+            fields,
+        ))
+        self.assertIn("Base Rent Schedule", text)
+        self.assertIn("CALCULATED", text)
+        self.assertIn("Calculated: $19,133.34", text)
+        self.assertIn("Apr 1, 2031", text)
+        self.assertIn("23,312.11", text)
+        self.assertNotRegex(text, r"Base Rent Year 2 \(Monthly\)\s+NOT FOUND")
 
 
 def _pdf_text(pdf_bytes: bytes) -> str:

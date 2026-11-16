@@ -361,26 +361,27 @@ def apply_computed_rent_schedule(fields: Optional[Dict[str, Any]]) -> Dict[str, 
     if not plan["computed"]:
         return updated
 
-    parent = (
-        "Base Rent Year 1 (monthly); Annual Escalation Rate or Cap"
+    parent = "Base Rent Year 1 (monthly); Annual Escalation Rate or Cap"
+    note = (
+        f"LeaseAI calculated this amount from Year 1 rent compounded at "
+        f"{plan['rate_pct']:g}% annually. It is not quoted from a year-by-year exhibit."
     )
+    by_year = {row["year"]: row for row in plan["rows"]}
     for index, name in enumerate(YEAR_FIELDS[1:], start=2):
+        row = by_year.get(index)
+        if not row:
+            continue
         key, payload = _field_get(updated, name, f"Base Rent Year {index}")
-        if not key:
-            continue
         amount = parse_money(_text(payload))
-        if amount is not None and amount_stated_in_source(amount, _snippet(payload)):
+        if key and amount is not None and amount_stated_in_source(amount, _snippet(payload)):
             continue
-        payload = dict(payload)
-        payload["value"] = NOT_STATED
-        payload["confidence"] = "LOW"
+        payload = dict(payload) if payload else {}
+        payload["value"] = row["monthly_display"]
+        payload["confidence"] = "COMPUTED"
+        payload["source_snippet"] = plan["method"]
         payload["derived_from"] = parent
-        payload["notes"] = (
-            "The lease does not state this year's monthly rent as a number. "
-            "LeaseAI calculated it in the Computed Rent Schedule from Year 1 rent "
-            "and the annual increase."
-        )
-        updated[key] = payload
+        payload["notes"] = note
+        updated[key or name] = payload
 
     updated[COMPUTED_FIELD] = {
         "value": _schedule_text(plan),
