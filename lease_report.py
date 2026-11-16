@@ -18,6 +18,7 @@ from reportlab.pdfgen import canvas
 import config
 from computed_rent_schedule import (
     META_KEY,
+    SCHEDULE_HEADING,
     apply_computed_rent_schedule,
     is_hidden_schedule_key,
 )
@@ -126,12 +127,12 @@ def _computed_rent_schedule_flowables(
     if not meta.get("computed") or not (meta.get("rows") or []):
         return flowables
 
-    flowables.append(Paragraph("Base Rent Schedule", heading_style))
+    flowables.append(Paragraph(SCHEDULE_HEADING, heading_style))
     flowables.append(
         Paragraph(
-            "Year 1 rent is quoted from the lease. Later years are calculated by LeaseAI "
-            "from that starting rent and the stated annual increase — they are not copied "
-            "from a year-by-year exhibit. "
+            "This workpaper expands the quoted Year 1 rent and the stated annual increase "
+            "through lease expiration. Later years are calculated by LeaseAI — they are not "
+            "copied from a year-by-year exhibit. "
             f"{html.escape(meta.get('method') or '')}.",
             cite_style,
         )
@@ -269,10 +270,11 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     )
     story.append(
         Paragraph(
-            "Quoted values are cited to the source document. Where the lease states "
-            "a formula instead of a year-by-year rent exhibit, LeaseAI calculates "
-            "the schedule and labels those figures Calculated. The Source Exhibit "
-            "at the end is the workpaper an auditor, lender, or buyer can attach.",
+            "Quoted values are in Extracted Lease Data. Where the lease states a "
+            "formula instead of a year-by-year rent exhibit, LeaseAI calculates the "
+            "schedule, labels those figures Calculated, and prints the Calculated "
+            "Base Rent Schedule after that table. The Source Exhibit at the end is "
+            "the citation workpaper an auditor, lender, or buyer can attach.",
             cite_style,
         )
     )
@@ -434,15 +436,6 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         alignment=TA_LEFT,
     )
 
-    story.extend(_computed_rent_schedule_flowables(
-        extracted_fields,
-        heading_style,
-        cite_style,
-        header_style,
-        field_name_style,
-        cell_style,
-        source_style,
-    ))
     story.append(Paragraph("Extracted Lease Data", heading_style))
     story.append(Spacer(1, 0.25 * inch))
 
@@ -458,13 +451,25 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         source = field_source(field_info, default_document="Original lease")
         
         display_value = html.escape(str(value) if value else "NOT FOUND")
+        notes = ""
+        if isinstance(field_info, dict):
+            notes = str(field_info.get("notes") or "").strip()
         if str(confidence or "").upper() == "COMPUTED":
             display_value = f"Calculated: {display_value}"
+            source_line = html.escape(
+                notes or source.get("excerpt") or f"See {SCHEDULE_HEADING}."
+            )
+            extra = ""
+        else:
+            source_line = format_source_html(source)
+            extra = ""
+            if notes and SCHEDULE_HEADING in notes:
+                extra = f"<br/><i>{html.escape(notes)}</i>"
         
         # Use Paragraph for automatic text wrapping
         field_name_para = Paragraph(html.escape(field_name.replace("_", " ").title()), field_name_style)
         value_para = Paragraph(
-            f"{display_value}<br/><i>Source: {format_source_html(source)}</i>",
+            f"{display_value}<br/><i>Source: {source_line}</i>{extra}",
             cell_style,
         )
         
@@ -517,6 +522,19 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     
     story.append(fields_table)
     story.append(Spacer(1, 0.35 * inch))
+
+    schedule_flowables = _computed_rent_schedule_flowables(
+        extracted_fields,
+        heading_style,
+        cite_style,
+        header_style,
+        field_name_style,
+        cell_style,
+        source_style,
+    )
+    if schedule_flowables:
+        story.append(PageBreak())
+        story.extend(schedule_flowables)
 
     story.append(Paragraph("Source Exhibit — where each extraction came from", heading_style))
     story.append(

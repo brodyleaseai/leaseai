@@ -115,9 +115,15 @@ class IronwoodPlanTests(unittest.TestCase):
         self.assertEqual(year2["value"], "$19,133.34")
         self.assertEqual(year2["confidence"], "COMPUTED")
         self.assertIn("Base Rent Year 1", year2["derived_from"])
+        self.assertIn("See Calculated Base Rent Schedule", year2["source_snippet"])
         self.assertIn(
             "Year 1 $224,000.00, increasing 2.5% annually",
             updated["Full Rent Schedule (all years)"]["value"],
+        )
+        self.assertEqual(updated["Full Rent Schedule (all years)"]["confidence"], "HIGH")
+        self.assertIn(
+            "see Calculated Base Rent Schedule",
+            updated["Full Rent Schedule (all years)"]["notes"],
         )
         self.assertIn("Year 10 |", updated[COMPUTED_FIELD]["value"])
         self.assertEqual(updated[COMPUTED_FIELD]["confidence"], "COMPUTED")
@@ -184,7 +190,15 @@ class AbstractPdfTests(unittest.TestCase):
         )
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         text = _pdf_text(pdf_bytes)
-        self.assertIn("Base Rent Schedule", text)
+        extracted_at = text.rfind("Extracted Lease Data")
+        schedule_at = text.find("This workpaper expands")
+        exhibit_at = text.find("where each extraction came from")
+        self.assertGreater(extracted_at, -1)
+        self.assertGreater(schedule_at, extracted_at)
+        self.assertGreater(exhibit_at, schedule_at)
+        self.assertIn("Calculated Base Rent Schedule", text)
+        self.assertIn("See Calculated Base Rent Schedule", text)
+        self.assertIn("Calculated expansion through expiration", text)
         self.assertIn("19,133.34", text)
         self.assertIn("Calculated", text)
         self.assertIn("Calculated: $19,133.34", text)
@@ -209,7 +223,13 @@ class AbstractPdfTests(unittest.TestCase):
             },
             fields,
         ))
-        self.assertIn("Base Rent Schedule", text)
+        extracted_at = text.rfind("Extracted Lease Data")
+        schedule_at = text.find("This workpaper expands")
+        exhibit_at = text.find("where each extraction came from")
+        self.assertGreater(schedule_at, extracted_at)
+        self.assertGreater(exhibit_at, schedule_at)
+        self.assertIn("Calculated Base Rent Schedule", text)
+        self.assertIn("See Calculated Base Rent Schedule", text)
         self.assertIn("CALCULATED", text)
         self.assertIn("Calculated: $19,133.34", text)
         self.assertIn("Apr 1, 2031", text)
