@@ -71,6 +71,7 @@ class LeaseExtractionPipeline:
             "Operating Expense Stop Amount",
             "CAM / Operating Cost Charges",
             "CAM Annual Increase Cap (%)",
+            "CAM Base Amount",
             "CAM Exclusions",
             
             # Taxes & Insurance

@@ -104,8 +104,10 @@ class CAMProvisionExtractor:
         
         # Extract excluded items from CAM Exclusions field
         if 'CAM Exclusions' in extracted_fields:
-            exclusions_text = str(extracted_fields['CAM Exclusions'])
-            if exclusions_text and 'NOT FOUND' not in exclusions_text:
+            exclusions_text = CAMProvisionExtractor._field_text(
+                extracted_fields['CAM Exclusions']
+            )
+            if exclusions_text and 'NOT FOUND' not in exclusions_text.upper():
                 provisions['exclusions_description'] = exclusions_text
                 provisions['excluded_items'] = CAMProvisionExtractor._parse_exclusions(exclusions_text)
         
@@ -436,6 +438,18 @@ class CAMStatementParser:
         if share_match:
             totals['tenant_share_billed'] = float(share_match.group(1).replace(',', ''))
 
+        paid_match = re.search(
+            r'(?:estimated CAM paid|CAM paid during)',
+            text,
+            re.I,
+        )
+        if paid_match:
+            window = text[paid_match.start(): paid_match.start() + 160]
+            window = re.split(r'Balance due', window, flags=re.I)[0]
+            amounts = re.findall(r'\$\s*([\d,]+\.\d{2})', window)
+            if amounts:
+                totals['estimated_cam_paid'] = float(amounts[-1].replace(',', ''))
+
         return totals
 
     @staticmethod
@@ -501,12 +515,16 @@ class CAMStatementParser:
             or numbered_sum
         )
         tenant_share = totals.get('tenant_share_billed') or gpt_result.get('tenant_share_billed')
+        estimated_paid = totals.get('estimated_cam_paid')
+        if estimated_paid in (None, ''):
+            estimated_paid = gpt_result.get('estimated_cam_paid')
 
         return {
             'statement_date': gpt_result.get('statement_date') or totals.get('statement_date'),
             'period_year': gpt_result.get('period_year') or totals.get('period_year'),
             'total_building_charges': building_total,
             'tenant_share_billed': tenant_share,
+            'estimated_cam_paid': estimated_paid,
             'line_items': line_items,
             'total_line_items': len(line_items),
             'parsing_method': parsing_method,
@@ -529,11 +547,13 @@ class CAMStatementParser:
         if not year and parsed_date:
             year = parsed_date.year - 1 if parsed_date.month <= 3 else parsed_date.year
 
+        paid = parsed.get('estimated_cam_paid')
         return {
             'recon_year': int(year) if year else datetime.now().year - 1,
             'statement_date': parsed_date or datetime.now().date(),
             'landlord_total': float(parsed.get('total_building_charges') or 0),
             'tenant_share_billed': float(parsed.get('tenant_share_billed') or 0),
+            'estimated_cam_paid': float(paid) if paid not in (None, '') else None,
         }
 
 
@@ -629,11 +649,35 @@ class CAMCalculationEngine:
         return result
 
     @staticmethod
+    @staticmethod
+    def cash_settlement(
+        calculated_share: float,
+        tenant_share_billed: float,
+        estimated_paid=None,
+    ) -> Dict:
+        """True-up after estimates already paid this year. Negative remaining is a credit."""
+        paid = CAMCalculationEngine._as_float(estimated_paid, None)
+        billed = CAMCalculationEngine._as_float(tenant_share_billed, 0.0)
+        allowed = CAMCalculationEngine._as_float(calculated_share, 0.0)
+        if paid is None:
+            return {
+                'estimated_cam_paid': None,
+                'landlord_trueup_billed': None,
+                'lease_remaining_due': None,
+            }
+        return {
+            'estimated_cam_paid': round(paid, 2),
+            'landlord_trueup_billed': round(billed - paid, 2),
+            'lease_remaining_due': round(allowed - paid, 2),
+        }
+
+    @staticmethod
     def reconcile_cam_charges(
         landlord_total: float,
         tenant_share_billed: float,
         cam_provisions: Dict,
         line_items: Optional[List[Dict]] = None,
+        estimated_paid=None,
     ) -> Dict:
         """Tenant share after removing lease-excluded lines, then applying stop/cap."""
         cam_provisions = cam_provisions or {}
@@ -663,12 +707,29 @@ class CAMCalculationEngine:
         calc['landlord_tenant_share'] = tenant_share_billed
         calc['variance_amount'] = variance
         calc['calculated_tenant_share'] = calculated_share
+        calc.update(
+            CAMCalculationEngine.cash_settlement(
+                calculated_share, tenant_share_billed, estimated_paid
+            )
+        )
         return calc
 
     @staticmethod
     def enrich_provisions(provisions: Optional[Dict], extracted_fields: Optional[Dict] = None) -> Dict:
         """Fill blank CAM terms from the lease abstract fields."""
         merged = dict(provisions or {})
+        if not merged.get('excluded_items') and merged.get('cam_exclusions'):
+            exclusions = merged.get('cam_exclusions')
+            if isinstance(exclusions, (list, tuple)):
+                merged['excluded_items'] = CAMProvisionExtractor._parse_exclusions(
+                    ", ".join(str(item) for item in exclusions)
+                )
+                merged['exclusions_description'] = merged.get('exclusions_description') or ", ".join(
+                    str(item) for item in exclusions
+                )
+            else:
+                merged['excluded_items'] = CAMProvisionExtractor._parse_exclusions(str(exclusions))
+                merged['exclusions_description'] = merged.get('exclusions_description') or str(exclusions)
         if extracted_fields:
             from_fields = CAMProvisionExtractor.extract_cam_provisions(extracted_fields)
             for key, value in from_fields.items():
@@ -926,10 +987,11 @@ def reconcile_cam_charges(
     tenant_share_billed: float,
     provisions: Dict,
     line_items: Optional[List[Dict]] = None,
+    estimated_paid=None,
 ) -> Dict:
     """Tenant CAM after exclusions, pro-rata, stop, and cap."""
     return CAMCalculationEngine.reconcile_cam_charges(
-        landlord_total, tenant_share_billed, provisions, line_items
+        landlord_total, tenant_share_billed, provisions, line_items, estimated_paid
     )
 
 
