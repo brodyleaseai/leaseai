@@ -20,6 +20,10 @@ from dateutil.relativedelta import relativedelta
 YEAR_FIELDS = [f"Base Rent Year {n} (monthly)" for n in range(1, 6)]
 COMPUTED_FIELD = "Computed Rent Schedule (through expiration)"
 META_KEY = "_computed_rent_schedule"
+SCHEDULE_HEADING = "Calculated Base Rent Schedule"
+FULL_SCHEDULE_POINTER = (
+    f"Calculated expansion through expiration: see {SCHEDULE_HEADING}."
+)
 
 SKIP_TYPE_MARKERS = ("CPI", "INDEX", "FMV", "FAIR MARKET", "MARKET RENT")
 COMPUTE_TYPE_MARKERS = ("FIXED", "PERCENT", "ANNUAL", "ESCALAT")
@@ -361,26 +365,39 @@ def apply_computed_rent_schedule(fields: Optional[Dict[str, Any]]) -> Dict[str, 
     if not plan["computed"]:
         return updated
 
-    parent = (
-        "Base Rent Year 1 (monthly); Annual Escalation Rate or Cap"
+    parent = "Base Rent Year 1 (monthly); Annual Escalation Rate or Cap"
+    see_note = (
+        f"See {SCHEDULE_HEADING}. Derived from Year 1 rent and "
+        f"{plan['rate_pct']:g}% annual increase; not quoted from a year-by-year exhibit."
     )
+    by_year = {row["year"]: row for row in plan["rows"]}
     for index, name in enumerate(YEAR_FIELDS[1:], start=2):
+        row = by_year.get(index)
+        if not row:
+            continue
         key, payload = _field_get(updated, name, f"Base Rent Year {index}")
-        if not key:
-            continue
         amount = parse_money(_text(payload))
-        if amount is not None and amount_stated_in_source(amount, _snippet(payload)):
+        if key and amount is not None and amount_stated_in_source(amount, _snippet(payload)):
             continue
-        payload = dict(payload)
-        payload["value"] = NOT_STATED
-        payload["confidence"] = "LOW"
+        payload = dict(payload) if payload else {}
+        payload["value"] = row["monthly_display"]
+        payload["confidence"] = "COMPUTED"
+        payload["source_snippet"] = see_note
         payload["derived_from"] = parent
-        payload["notes"] = (
-            "The lease does not state this year's monthly rent as a number. "
-            "LeaseAI calculated it in the Computed Rent Schedule from Year 1 rent "
-            "and the annual increase."
-        )
-        updated[key] = payload
+        payload["notes"] = see_note
+        updated[key or name] = payload
+
+    full_key, full_payload = _field_get(
+        updated, "Full Rent Schedule (all years)", "Full Rent Schedule"
+    )
+    if full_key:
+        full_payload = dict(full_payload) if full_payload else {}
+        existing = str(full_payload.get("notes") or "").strip()
+        if FULL_SCHEDULE_POINTER not in existing:
+            full_payload["notes"] = (
+                f"{existing} {FULL_SCHEDULE_POINTER}".strip() if existing else FULL_SCHEDULE_POINTER
+            )
+        updated[full_key] = full_payload
 
     updated[COMPUTED_FIELD] = {
         "value": _schedule_text(plan),
