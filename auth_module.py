@@ -132,7 +132,17 @@ class AuthManager:
             return False, None, "Invalid credentials", False
             
         except Exception as e:
-            return False, None, f"Login error: {str(e)}", False
+            text = str(e)
+            if "Invalid API key" in text or '"code": 401' in text or "'code': 401" in text:
+                return (
+                    False,
+                    None,
+                    "Supabase rejected the API key. Put SUPABASE_SERVICE_KEY in "
+                    ".env next to Home.py (or .streamlit/secrets.toml) and restart "
+                    "from the LeaseAI folder with Start-LeaseAI.ps1.",
+                    False,
+                )
+            return False, None, f"Login error: {text}", False
     
     def logout(self):
         """Clear authentication session."""

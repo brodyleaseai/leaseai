@@ -17,10 +17,69 @@ except ImportError:
     # python-dotenv not installed, will use system environment variables only
     pass
 
+_PLACEHOLDER_SECRETS = {
+    "",
+    "your-anon-key-here",
+    "your-service-role-key-here",
+    "your-openai-key-here",
+    "your-sendgrid-key-here",
+    "sk_test_your-stripe-key-here",
+    "pk_test_your-stripe-key-here",
+    "whsec_your-webhook-secret-here",
+}
+
+
+def is_placeholder_secret(value) -> bool:
+    """True when a config value is missing or still the committed dummy."""
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    lower = text.lower()
+    if lower in _PLACEHOLDER_SECRETS:
+        return True
+    if lower.startswith("your-") and lower.endswith("-here"):
+        return True
+    return False
+
+
+def _streamlit_secret(name: str):
+    """Read Streamlit secrets without crashing when secrets.toml is absent."""
+    try:
+        import streamlit as st
+        secrets = getattr(st, "secrets", None)
+        if secrets is None:
+            return None
+        try:
+            value = secrets[name]
+        except Exception:
+            try:
+                value = secrets.get(name)
+            except Exception:
+                return None
+        return value
+    except Exception:
+        return None
+
+
+def read_secret(name: str, default: str = "") -> str:
+    """Prefer a real env/.env value, then Streamlit secrets, then default."""
+    env_val = os.getenv(name)
+    if env_val is not None and not is_placeholder_secret(env_val):
+        return env_val
+    file_val = _streamlit_secret(name)
+    if file_val is not None and not is_placeholder_secret(file_val):
+        return str(file_val).strip()
+    if env_val is not None:
+        return env_val
+    return default
+
+
 # Supabase Configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://nttwaqptwfwchedsqqem.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "your-anon-key-here")  # Replace with your actual anon key
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "your-service-role-key-here")  # Replace with your actual service role key
+SUPABASE_URL = read_secret("SUPABASE_URL", "https://nttwaqptwfwchedsqqem.supabase.co")
+SUPABASE_KEY = read_secret("SUPABASE_KEY", "your-anon-key-here")  # Replace with your actual anon key
+SUPABASE_SERVICE_KEY = read_secret("SUPABASE_SERVICE_KEY", "your-service-role-key-here")  # Replace with your actual service role key
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-openai-key-here")

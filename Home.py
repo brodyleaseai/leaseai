@@ -24,6 +24,15 @@ st.set_page_config(
 )
 
 # Initialize Supabase
+if config.is_placeholder_secret(config.SUPABASE_SERVICE_KEY):
+    st.error(
+        "Supabase is not configured. Login needs SUPABASE_URL and "
+        "SUPABASE_SERVICE_KEY in a `.env` file next to Home.py, or in "
+        "`.streamlit/secrets.toml`. Restart Streamlit from the folder that "
+        "contains Home.py (`Start-LeaseAI.ps1`)."
+    )
+    st.stop()
+
 try:
     sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
     auth = AuthManager(sb)
