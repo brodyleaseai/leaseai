@@ -151,16 +151,88 @@ class CAMProvisionExtractor:
                 if amount:
                     provisions['cam_base_amount'] = amount
                     break
-        if not provisions.get('cam_base_amount'):
-            for key, raw in extracted_fields.items():
-                blob = CAMProvisionExtractor._field_text(raw)
-                if 'CAM BASE AMOUNT' in f"{key} {blob}".upper():
-                    amount = CAMProvisionExtractor._extract_currency(blob)
-                    if amount:
-                        provisions['cam_base_amount'] = amount
-                        break
-        
+        corpus = CAMProvisionExtractor.fields_corpus(extracted_fields)
+        from_text = CAMProvisionExtractor.parse_cam_terms_from_text(corpus)
+        for key, value in from_text.items():
+            current = provisions.get(key)
+            if current in (None, '', []) and value not in (None, '', []):
+                provisions[key] = value
+            elif key == 'tenant_audit_right' and value is True:
+                provisions[key] = True
+            elif key == 'has_cam_cap' and value is True:
+                provisions[key] = True
         return provisions
+
+    @staticmethod
+    def fields_corpus(extracted_fields: Optional[Dict]) -> str:
+        parts = []
+        for key, raw in (extracted_fields or {}).items():
+            text = CAMProvisionExtractor._field_text(raw)
+            if text:
+                parts.append(f"{key}: {text}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def parse_cam_terms_from_text(lease_text: str) -> Dict:
+        """Read CAM Base Amount, cap, and audit rights from lease (or abstract) text."""
+        text = lease_text or ""
+        found: Dict = {}
+        if not text.strip():
+            return found
+        upper = text.upper()
+
+        base_match = re.search(
+            r'CAM\s+BASE\s+AMOUNT[^$\n]{0,160}\$\s*([\d,]+(?:\.\d{1,2})?)',
+            text,
+            re.IGNORECASE,
+        )
+        if base_match:
+            try:
+                found['cam_base_amount'] = float(base_match.group(1).replace(',', ''))
+            except ValueError:
+                pass
+
+        year_match = re.search(
+            r'CAM\s+BASE\s+YEAR[^\d]{0,80}((?:19|20)\d{2})',
+            text,
+            re.IGNORECASE,
+        )
+        if year_match:
+            found['cam_base_year'] = int(year_match.group(1))
+
+        cap_match = re.search(
+            r'CAM\s+ANNUAL\s+INCREASE\s+CAP[^%]{0,120}(\d+(?:\.\d+)?)\s*%',
+            text,
+            re.IGNORECASE,
+        )
+        if not cap_match:
+            cap_match = re.search(
+                r'four\s+percent\s*\(\s*4\s*%\s*\)',
+                text,
+                re.IGNORECASE,
+            )
+            if cap_match:
+                found['has_cam_cap'] = True
+                found['cam_cap_percentage'] = 4.0
+        else:
+            found['has_cam_cap'] = True
+            found['cam_cap_percentage'] = float(cap_match.group(1))
+
+        if re.search(r'TENANT\s+AUDIT\s+RIGHT[:\s]+YES', upper) or (
+            'TENANT IS ALLOWED TO AUDIT' in upper
+        ):
+            found['tenant_audit_right'] = True
+
+        deadline_match = re.search(
+            r'Audit\s+Deadline[:\s]+([^\n]+)',
+            text,
+            re.IGNORECASE,
+        )
+        if deadline_match:
+            deadline = deadline_match.group(1).strip().rstrip('.')
+            if deadline and 'NOT FOUND' not in deadline.upper():
+                found['audit_deadline'] = deadline
+        return found
 
     @staticmethod
     def _field_text(value) -> str:
@@ -176,10 +248,7 @@ class CAMProvisionExtractor:
     @staticmethod
     def _extract_currency(value) -> Optional[float]:
         """Extract numeric currency value from string"""
-        if isinstance(value, dict):
-            value = value.get('value', '')
-        
-        value_str = str(value)
+        value_str = CAMProvisionExtractor._field_text(value)
         match = re.search(r'\$\s*([\d,]+(?:\.\d{1,2})?)', value_str)
         if match:
             try:
@@ -649,7 +718,6 @@ class CAMCalculationEngine:
         return result
 
     @staticmethod
-    @staticmethod
     def cash_settlement(
         calculated_share: float,
         tenant_share_billed: float,
@@ -715,8 +783,12 @@ class CAMCalculationEngine:
         return calc
 
     @staticmethod
-    def enrich_provisions(provisions: Optional[Dict], extracted_fields: Optional[Dict] = None) -> Dict:
-        """Fill blank CAM terms from the lease abstract fields."""
+    def enrich_provisions(
+        provisions: Optional[Dict],
+        extracted_fields: Optional[Dict] = None,
+        lease_text: Optional[str] = None,
+    ) -> Dict:
+        """Fill blank CAM terms from the lease abstract and source lease text."""
         merged = dict(provisions or {})
         if not merged.get('excluded_items') and merged.get('cam_exclusions'):
             exclusions = merged.get('cam_exclusions')
@@ -730,16 +802,30 @@ class CAMCalculationEngine:
             else:
                 merged['excluded_items'] = CAMProvisionExtractor._parse_exclusions(str(exclusions))
                 merged['exclusions_description'] = merged.get('exclusions_description') or str(exclusions)
+        corpus_parts = []
         if extracted_fields:
             from_fields = CAMProvisionExtractor.extract_cam_provisions(extracted_fields)
-            for key, value in from_fields.items():
-                current = merged.get(key)
-                empty = current in (None, '', [], False)
-                if empty and value not in (None, '', [], False):
-                    merged[key] = value
+            CAMCalculationEngine._fill_blank_provisions(merged, from_fields)
+            corpus_parts.append(CAMProvisionExtractor.fields_corpus(extracted_fields))
+        if lease_text:
+            corpus_parts.append(lease_text)
+        if corpus_parts:
+            from_text = CAMProvisionExtractor.parse_cam_terms_from_text("\n".join(corpus_parts))
+            CAMCalculationEngine._fill_blank_provisions(merged, from_text)
         if CAMCalculationEngine._as_float(merged.get('cam_cap_percentage'), None):
             merged['has_cam_cap'] = True
         return merged
+
+    @staticmethod
+    def _fill_blank_provisions(merged: Dict, incoming: Dict) -> None:
+        for key, value in (incoming or {}).items():
+            if value in (None, '', []):
+                continue
+            current = merged.get(key)
+            if current in (None, '', []):
+                merged[key] = value
+            elif key in ('tenant_audit_right', 'has_cam_cap') and value is True:
+                merged[key] = True
 
     @staticmethod
     def _as_float(value, default=0.0):
@@ -810,17 +896,29 @@ class CAMCalculationEngine:
         if not exclusion_text.strip() and not excluded:
             return False, None
 
-        checks = [
-            (['CAPITAL', 'ROOF'], 'Capital improvement / roof replacement is excluded per lease terms'),
-            (['STRUCTURAL'], 'Structural repairs are excluded per lease terms'),
-            (['DEPRECIATION'], 'Depreciation is excluded per lease terms'),
-            (['DEBT SERVICE', 'DEBT_SERVICE', 'MORTGAGE'], 'Debt service / mortgage is excluded per lease terms'),
-            (['LEGAL'], 'Legal fees relating to other tenants are excluded per lease terms'),
+        rules = [
+            ('any', ['LEGAL'], ['LEGAL'], 'Legal fees relating to other tenants are excluded per lease terms'),
+            ('all', ['HVAC'], ['HVAC', 'REPLAC'], 'HVAC replacement is excluded per lease terms'),
+            ('any', ['ROOF'], ['ROOF'], 'Roof replacement is excluded per lease terms'),
+            ('all', ['PARKING'], ['PARKING', 'RECONSTRUCT'], 'Parking lot reconstruction is excluded per lease terms'),
+            ('any', ['CAPITAL'], ['CAPITAL'], 'Capital improvements are excluded per lease terms'),
+            ('any', ['STRUCTURAL'], ['STRUCTURAL'], 'Structural repairs are excluded per lease terms'),
+            ('any', ['DEPRECIATION'], ['DEPRECIATION'], 'Depreciation is excluded per lease terms'),
+            (
+                'any',
+                ['DEBT SERVICE', 'DEBT_SERVICE', 'MORTGAGE'],
+                ['DEBT SERVICE', 'DEBT_SERVICE', 'MORTGAGE'],
+                'Debt service / mortgage is excluded per lease terms',
+            ),
         ]
-        for keys, reason in checks:
-            lease_has = any(key in exclusion_text for key in keys)
-            item_has = any(key in blob for key in keys)
-            if lease_has and item_has:
+        for mode, lease_keys, item_keys, reason in rules:
+            if not any(key in exclusion_text for key in lease_keys):
+                continue
+            if mode == 'all':
+                item_has = all(key in blob for key in item_keys)
+            else:
+                item_has = any(key in blob for key in item_keys)
+            if item_has:
                 return True, reason
         return False, None
     
@@ -995,9 +1093,13 @@ def reconcile_cam_charges(
     )
 
 
-def enrich_cam_provisions(provisions: Optional[Dict], extracted_fields: Optional[Dict] = None) -> Dict:
-    """Fill blank CAM terms from abstracted lease fields."""
-    return CAMCalculationEngine.enrich_provisions(provisions, extracted_fields)
+def enrich_cam_provisions(
+    provisions: Optional[Dict],
+    extracted_fields: Optional[Dict] = None,
+    lease_text: Optional[str] = None,
+) -> Dict:
+    """Fill blank CAM terms from abstracted lease fields and source lease text."""
+    return CAMCalculationEngine.enrich_provisions(provisions, extracted_fields, lease_text)
 
 
 def analyze_line_items(line_items: List[Dict], cam_provisions: Dict) -> List[Dict]:

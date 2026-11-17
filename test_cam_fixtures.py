@@ -19,7 +19,7 @@ from cam_engine import (  # noqa: E402
     enrich_cam_provisions,
     reconcile_cam_charges,
 )
-from cam_gpt_extractor import extract_text_from_pdf  # noqa: E402
+from cam_gpt_extractor import extract_text_from_pdf, extract_text_from_pdf_bytes  # noqa: E402
 from cam_pdf_report import generate_cam_pdf_report  # noqa: E402
 
 
@@ -653,6 +653,94 @@ class IronwoodEngineMathTests(unittest.TestCase):
         self.assertIn("Remaining due under lease", text)
         self.assertIn("already paid this year", text)
         self.assertGreaterEqual(text.count("Challenge"), 4)
+
+    def test_lease_pdf_fills_base_amount_audit_and_cap(self):
+        merged = enrich_cam_provisions(
+            {"tenant_prorata_share": IW.TENANT_PRORATA_SHARE},
+            {},
+            lease_text=_pdf_text(IW.LEASE_PDF),
+        )
+        self.assertEqual(merged["cam_base_amount"], IW.CAM_BASE_AMOUNT)
+        self.assertEqual(merged["cam_cap_percentage"], IW.CAM_CAP_PERCENTAGE)
+        self.assertTrue(merged["tenant_audit_right"])
+        self.assertIn("60 days", merged["audit_deadline"])
+
+    def test_reviewed_value_dict_yields_base_amount(self):
+        merged = enrich_cam_provisions({}, {
+            "CAM Base Amount": {"reviewed_value": "$80,000.00", "value": ""},
+        })
+        self.assertEqual(merged["cam_base_amount"], 80000.00)
+
+    def test_source_lease_text_applies_cap_and_credits_tenant(self):
+        parsed = assemble_cam_statement(_pdf_text(IW.STATEMENT_PDF))
+        provisions = enrich_cam_provisions(
+            {
+                "tenant_prorata_share": IW.TENANT_PRORATA_SHARE,
+                "excluded_items": IW.CAM_EXCLUSIONS,
+                "exclusions_description": IW.CAM_EXCLUSIONS_CLAUSE,
+            },
+            {},
+            lease_text=_pdf_text(IW.LEASE_PDF),
+        )
+        result = reconcile_cam_charges(
+            IW.BUILDING_TOTAL_CHARGES,
+            IW.TENANT_SHARE_BILLED,
+            provisions,
+            parsed["line_items"],
+            parsed["estimated_cam_paid"],
+        )
+        self.assertEqual(result["calculated_tenant_share"], 83200.00)
+        self.assertEqual(result["lease_remaining_due"], -800.00)
+        self.assertTrue(result["cam_cap_applied"])
+        pdf_bytes = generate_cam_pdf_report(
+            {
+                "property_address": IW.PROPERTY_ADDRESS,
+                "tenant_name": IW.TENANT_NAME,
+                "landlord_name": IW.LANDLORD_NAME,
+            },
+            {
+                "reconciliation_year": IW.RECONCILIATION_YEAR,
+                "statement_date": IW.STATEMENT_DATE,
+                "landlord_total_charges": IW.BUILDING_TOTAL_CHARGES,
+                "landlord_tenant_share": IW.TENANT_SHARE_BILLED,
+                "calculated_tenant_share": result["calculated_tenant_share"],
+                "variance_amount": result["variance_amount"],
+                "excluded_building_charges": result["excluded_building_charges"],
+                "allowable_building_charges": result["allowable_building_charges"],
+                "cam_cap_applied": result["cam_cap_applied"],
+                "estimated_cam_paid": result["estimated_cam_paid"],
+                "landlord_trueup_billed": result["landlord_trueup_billed"],
+                "lease_remaining_due": result["lease_remaining_due"],
+            },
+            result["analyzed_line_items"],
+            provisions,
+        )
+        text = _pdf_text_from_bytes(pdf_bytes)
+        self.assertIn("83,200.00", text)
+        self.assertIn("800.00", text)
+        self.assertIn("Credit due tenant", text)
+        self.assertNotIn("not on this file", text)
+        hvac = next(
+            item for item in result["analyzed_line_items"]
+            if "HVAC replacement" in (item.get("description") or "")
+        )
+        self.assertEqual(
+            hvac["dispute_reason"],
+            "HVAC replacement is excluded per lease terms",
+        )
+        roof = next(
+            item for item in result["analyzed_line_items"]
+            if "Roof replacement" in (item.get("description") or "")
+        )
+        self.assertEqual(
+            roof["dispute_reason"],
+            "Roof replacement is excluded per lease terms",
+        )
+
+    def test_extract_text_from_pdf_bytes_reads_ironwood_lease(self):
+        text = extract_text_from_pdf_bytes(IW.LEASE_PDF.read_bytes())
+        self.assertIn("CAM Base Amount", text)
+        self.assertIn("$80,000.00", text)
 
 
 if __name__ == "__main__":

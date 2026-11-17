@@ -222,33 +222,43 @@ def parse_cam_statement_with_gpt(statement_text: str, openai_api_key: str) -> Di
     return CAMStatementGPTParser.parse_cam_statement(statement_text, openai_api_key)
 
 
+def extract_text_from_pdf_bytes(pdf_bytes) -> str:
+    """Extract selectable text from PDF bytes (source lease in storage)."""
+    if not pdf_bytes:
+        return ""
+    from io import BytesIO
+
+    try:
+        import pdfplumber
+
+        text = ""
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text() or ""
+                text += f"\n--- Page {page_num} ---\n{page_text}\n"
+        return text
+    except Exception:
+        try:
+            import PyPDF2
+
+            reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
+            text = ""
+            for page_num, page in enumerate(reader.pages, 1):
+                page_text = page.extract_text() or ""
+                text += f"\n--- Page {page_num} ---\n{page_text}\n"
+            return text
+        except Exception:
+            return ""
+
+
 def extract_text_from_pdf(pdf_path: str) -> str:
     """
     Extract text from PDF file
     Uses pdfplumber for better text extraction
     """
     try:
-        import pdfplumber
-        
-        text = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                page_text = page.extract_text() or ""
-                text += f"\n--- Page {page_num} ---\n{page_text}\n"
-        
-        return text
-    except ImportError:
-        # Fallback to PyPDF2
-        import PyPDF2
-        
-        text = ""
         with open(pdf_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page_num, page in enumerate(pdf_reader.pages, 1):
-                page_text = page.extract_text() or ""
-                text += f"\n--- Page {page_num} ---\n{page_text}\n"
-        
-        return text
+            return extract_text_from_pdf_bytes(file.read())
     except Exception as e:
         print(f"Error extracting text from PDF: {str(e)}")
         return ""
