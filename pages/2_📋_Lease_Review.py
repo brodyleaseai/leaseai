@@ -511,7 +511,24 @@ elif page == "🔍 Review a Lease":
                 
                 # Generate PDF
                 pdf_bytes = generate_lease_abstract_pdf(lease, extracted_dict)
-                
+                abstract_name = f"LeaseAbstract_{lease_id}_{lease.get('property_address', 'lease').replace(' ', '_')}.pdf"
+
+                # Archive the generated PDF (download still works if storage is not set up)
+                try:
+                    from report_archive import REPORT_KIND_LEASE_ABSTRACT, persist_generated_report
+
+                    persist_generated_report(
+                        sb,
+                        lease_id=lease_id,
+                        kind=REPORT_KIND_LEASE_ABSTRACT,
+                        pdf_bytes=pdf_bytes,
+                        filename=abstract_name,
+                        user_id=st.session_state.get("user_id"),
+                        metadata={"fields_exported": list(extracted_dict.keys())},
+                    )
+                except Exception:
+                    pass
+
                 # Log export
                 try:
                     sb.table("export_history").insert({
@@ -529,7 +546,7 @@ elif page == "🔍 Review a Lease":
                 st.download_button(
                     label="⬇️ Download PDF Report",
                     data=pdf_bytes,
-                    file_name=f"LeaseAbstract_{lease_id}_{lease.get('property_address', 'lease').replace(' ', '_')}.pdf",
+                    file_name=abstract_name,
                     mime="application/pdf",
                     use_container_width=True
                 )
