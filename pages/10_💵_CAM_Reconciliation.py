@@ -156,11 +156,44 @@ def load_extracted_field_map(lease_id):
         mapped[name] = field.get("reviewed_value") or field.get("raw_value")
     return mapped
 
+
+def load_lease_cam_source_text(lease_id):
+    """Abstract field dump plus the source lease PDF when storage has it."""
+    chunks = []
+    fields = load_extracted_field_map(lease_id)
+    for name, value in fields.items():
+        if value:
+            chunks.append(f"{name}: {value}")
+    try:
+        lease_res = sb.table("leases").select("file_path").eq("id", lease_id).execute()
+        path = (lease_res.data or [{}])[0].get("file_path")
+        if path:
+            from cam_gpt_extractor import extract_text_from_pdf_bytes
+
+            pdf_bytes = None
+            try:
+                pdf_bytes = sb.storage.from_("leases").download(path)
+            except Exception:
+                pdf_bytes = None
+            if isinstance(pdf_bytes, dict):
+                pdf_bytes = pdf_bytes.get("data") or pdf_bytes.get("body")
+            if pdf_bytes:
+                pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
+                if pdf_text:
+                    chunks.append(pdf_text)
+    except Exception:
+        pass
+    return "\n".join(chunks)
+
 def run_cam_calculation(lease_id, cam_provisions, recon_year, statement_date, landlord_total, tenant_share_billed):
     """Compare billed tenant share to the amount allowed by the lease."""
     landlord_total = float(landlord_total or 0)
     tenant_share_billed = float(tenant_share_billed or 0)
-    provisions = enrich_cam_provisions(cam_provisions, load_extracted_field_map(lease_id))
+    provisions = enrich_cam_provisions(
+        cam_provisions,
+        load_extracted_field_map(lease_id),
+        load_lease_cam_source_text(lease_id),
+    )
     parsed = st.session_state.get("parsed_cam_statement") or {}
     line_items = parsed.get("line_items") or []
     estimated_paid = parsed.get("estimated_cam_paid")
@@ -222,6 +255,7 @@ def build_cam_report(results):
     lease_data, cam_prov = load_lease_and_provisions(results["lease_id"])
     lease_data = dict(lease_data or {})
     fields = load_extracted_field_map(results["lease_id"])
+    lease_text = load_lease_cam_source_text(results["lease_id"])
     if not lease_data.get("landlord_name"):
         lease_data["landlord_name"] = (
             fields.get("Landlord Legal Name") or fields.get("Landlord Name")
@@ -232,7 +266,9 @@ def build_cam_report(results):
         )
     if not lease_data.get("property_address"):
         lease_data["property_address"] = fields.get("Property Address")
-    provisions = enrich_cam_provisions(results.get("provisions_used") or cam_prov, fields)
+    provisions = enrich_cam_provisions(
+        results.get("provisions_used") or cam_prov, fields, lease_text
+    )
     line_items = report_line_items(results, provisions)
     recon_data = {
         "reconciliation_year": results["recon_year"],
@@ -489,16 +525,16 @@ with tab2:
                                     
                                     # Get extracted fields text
                                     fields_res = sb.table("extracted_fields").select("*").eq("lease_id", selected_lease_id).execute()
-                                    lease_text = f"Property: {lease_data.get('property_address')}\n"
-                                    lease_text += f"Tenant: {lease_data.get('tenant_name')}\n\n"
-                                    
-                                    # Build lease text from extracted fields
-                                    for field in fields_res.data:
-                                        field_name = field.get('field_name', '')
-                                        value = field.get('reviewed_value') or field.get('raw_value', '')
-                                        lease_text += f"{field_name}: {value}\n"
-                                    
-                                    # Extract provisions
+                                    lease_text = load_lease_cam_source_text(selected_lease_id)
+                                    if not lease_text.strip():
+                                        lease_text = f"Property: {lease_data.get('property_address')}\n"
+                                        lease_text += f"Tenant: {lease_data.get('tenant_name')}\n\n"
+                                        for field in fields_res.data:
+                                            field_name = field.get('field_name', '')
+                                            value = field.get('reviewed_value') or field.get('raw_value', '')
+                                            lease_text += f"{field_name}: {value}\n"
+
+                                    # Extract provisions from the source lease (PDF when stored), not only the abstract grid
                                     provisions = extract_cam_provisions_with_gpt(lease_text, api_key)
                                     
                                     if provisions.get('error'):
@@ -507,6 +543,7 @@ with tab2:
                                         provisions = enrich_cam_provisions(
                                             provisions,
                                             load_extracted_field_map(selected_lease_id),
+                                            lease_text,
                                         )
                                         if save_cam_provisions_to_db(selected_lease_id, provisions, sb):
                                             st.success("✅ CAM provisions extracted and saved!")
@@ -587,6 +624,7 @@ with tab2:
                 flag_provisions = enrich_cam_provisions(
                     cam_provisions or {},
                     load_extracted_field_map(selected_lease_id),
+                    load_lease_cam_source_text(selected_lease_id),
                 )
                 analyzed_items = analyze_line_items(line_items, flag_provisions)
                 challenged = [item for item in analyzed_items if item.get("should_challenge")]

@@ -73,6 +73,8 @@ class LeaseExtractionPipeline:
             "CAM Annual Increase Cap (%)",
             "CAM Base Amount",
             "CAM Exclusions",
+            "Tenant Audit Right",
+            "Audit Deadline",
             
             # Taxes & Insurance
             "Property Tax Responsibility",
