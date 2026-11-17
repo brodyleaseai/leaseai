@@ -966,6 +966,24 @@ with tab2:
                             if sent:
                                 st.success(f"CAM workpaper emailed to {recipient_email.strip()}.")
                                 st.session_state["show_cam_email"] = False
+                                try:
+                                    from report_archive import (
+                                        REPORT_KIND_CAM_WORKPAPER,
+                                        persist_generated_report,
+                                    )
+
+                                    persist_generated_report(
+                                        sb,
+                                        lease_id=results.get("lease_id"),
+                                        kind=REPORT_KIND_CAM_WORKPAPER,
+                                        pdf_bytes=pdf_bytes,
+                                        filename=filename or "CAM_Reconciliation.pdf",
+                                        user_id=st.session_state.get("user_id"),
+                                        reconciliation_year=int(results["recon_year"]),
+                                        metadata={"delivered_via": "email"},
+                                    )
+                                except Exception:
+                                    pass
                             else:
                                 st.error(
                                     "SendGrid did not send the email. Check SENDGRID_API_KEY in "
@@ -979,47 +997,50 @@ with tab2:
             # Save button (now outside the Calculate button's block!)
             if st.button("💾 Save Reconciliation to Database", use_container_width=True, type="primary", key="save_recon"):
                 try:
-                    # Prepare record
-                    recon_record = {
-                        'lease_id': results['lease_id'],
-                        'reconciliation_year': int(results['recon_year']),
-                        'statement_date': results['statement_date'].isoformat(),
-                        'landlord_total_charges': float(results['landlord_total']),
-                        'landlord_tenant_share': float(results['tenant_share_billed']),
-                        'calculated_total_charges': float(results['landlord_total']),
-                        'calculated_tenant_share': float(results['calculated_share']),
-                        'variance_amount': float(results['variance']),
-                        'variance_percentage': float(results['variance_percentage']),
-                        'status': 'UNDER_REVIEW',
-                        'dispute_status': 'NOT_DISPUTED' if abs(results['variance']) < 100 else 'CHALLENGE_DRAFTED',
-                        'uploaded_by': st.session_state.get('user_id'),
-                        'uploaded_at': datetime.now().isoformat()
-                    }
-                    
-                    # Attempt insert
-                    result = sb.table("cam_reconciliations").insert(recon_record).execute()
-                    
-                    if result.data:
-                        st.success("✅ CAM reconciliation saved successfully!")
-                        st.balloons()
-                        st.info("💡 Switch to the 'Dashboard' or 'History' tab to view your saved reconciliation.")
-                        
-                        # Store success state to show on other tabs
-                        st.session_state['last_reconciliation_saved'] = True
-                        st.session_state['saved_reconciliation_id'] = result.data[0].get('id')
-                        
-                        # Clear calculation results
-                        del st.session_state['cam_calc_results']
-                    else:
-                        st.warning("⚠️ Save completed but no confirmation returned. Please check the History tab.")
-                    
+                    from report_archive import SCHEMA_HINT, persist_cam_reconciliation
+
+                    pdf_bytes = st.session_state.get("cam_report_pdf")
+                    filename = st.session_state.get("cam_report_filename")
+                    if not pdf_bytes:
+                        pdf_bytes, filename, _ = build_cam_report(results)
+
+                    saved = persist_cam_reconciliation(
+                        sb,
+                        lease_id=results["lease_id"],
+                        results=results,
+                        line_items=report_line_items(
+                            results, results.get("provisions_used") or {}
+                        ),
+                        pdf_bytes=pdf_bytes,
+                        filename=filename,
+                        user_id=st.session_state.get("user_id"),
+                    )
+
+                    st.session_state["last_reconciliation_saved"] = True
+                    st.session_state["saved_reconciliation_id"] = saved.get("reconciliation_id")
+                    st.success(
+                        "✅ Saved the full CAM workpaper: settlement, line items"
+                        + (", and PDF in the reports archive." if saved.get("pdf_stored") else ".")
+                    )
+                    remaining = saved.get("lease_remaining_due")
+                    if remaining is not None:
+                        st.info(
+                            f"Remaining due under the lease: {format_currency(remaining)}. "
+                            "Open the History tab to reopen this file. Download still works on this page."
+                        )
+                    if not saved.get("pdf_stored"):
+                        st.warning(
+                            "Numbers and line items saved. PDF file storage is not configured yet. "
+                            + SCHEMA_HINT
+                        )
                 except Exception as e:
                     st.error(f"❌ Failed to save reconciliation: {str(e)}")
                     
                     # More helpful error messages for common issues
                     error_str = str(e).lower()
                     if 'does not exist' in error_str or 'relation' in error_str:
-                        st.info("💡 Database tables may not be set up. Please run the database schema script.")
+                        from report_archive import SCHEMA_HINT
+                        st.info(f"💡 {SCHEMA_HINT}")
                     elif 'permission denied' in error_str:
                         st.info("💡 Permission issue. Please run the GRANT statements in Supabase SQL Editor.")
                     elif 'foreign key' in error_str or 'violates' in error_str:
@@ -1084,7 +1105,12 @@ with tab3:
                     variance = recon.get('variance_amount', 0) or 0
                     variance_class = "variance-negative" if variance > 0 else "variance-positive"
                     st.markdown(f"**Variance:** <span class='{variance_class}'>{format_currency(abs(variance))}</span>", unsafe_allow_html=True)
-                    
+                    if recon.get("estimated_cam_paid") is not None:
+                        st.markdown(f"**Already paid:** {format_currency(recon.get('estimated_cam_paid'))}")
+                    if recon.get("lease_remaining_due") is not None:
+                        remaining = recon.get("lease_remaining_due") or 0
+                        remaining_label = "Remaining due" if remaining >= 0 else "Credit due tenant"
+                        st.markdown(f"**{remaining_label}:** {format_currency(abs(remaining))}")
                     st.markdown(f"**Dispute Status:** {recon.get('dispute_status', 'NOT_DISPUTED')}")
                 
                 # Action buttons
@@ -1120,29 +1146,34 @@ with tab3:
                 with col_c:
                     if st.button("📄 PDF Report", key=f"report_{recon['id']}", use_container_width=True):
                         try:
-                            from cam_pdf_report import generate_cam_pdf_report
-                            
-                            # Get all data
-                            lease_res = sb.table("leases").select("*").eq("id", recon.get('lease_id')).execute()
-                            lease_data = lease_res.data[0] if lease_res.data else {}
-                            
-                            cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", recon.get('lease_id')).execute()
-                            cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
-                            
-                            # Get line items if available
-                            line_items_res = sb.table("cam_line_items").select("*").eq("reconciliation_id", recon['id']).execute()
-                            line_items = line_items_res.data if line_items_res.data else []
-                            
-                            # Generate PDF
-                            pdf_bytes = generate_cam_pdf_report(lease_data, recon, line_items, cam_prov)
-                            
-                            property_name = lease_data.get('property_address', 'Property').replace(' ', '_')[:30]
-                            filename = f"CAM_Report_{property_name}_{recon.get('reconciliation_year')}.pdf"
-                            
+                            from report_archive import fetch_stored_report
+
+                            stored = fetch_stored_report(sb, reconciliation_id=recon["id"])
+                            pdf_bytes = stored.get("pdf_bytes") if stored else None
+                            filename = None
+                            if stored and stored.get("row"):
+                                filename = stored["row"].get("filename")
+
+                            if not pdf_bytes:
+                                from cam_pdf_report import generate_cam_pdf_report
+
+                                lease_res = sb.table("leases").select("*").eq("id", recon.get('lease_id')).execute()
+                                lease_data = lease_res.data[0] if lease_res.data else {}
+
+                                cam_prov_res = sb.table("cam_provisions").select("*").eq("lease_id", recon.get('lease_id')).execute()
+                                cam_prov = cam_prov_res.data[0] if cam_prov_res.data else {}
+
+                                line_items_res = sb.table("cam_line_items").select("*").eq("reconciliation_id", recon['id']).execute()
+                                line_items = line_items_res.data if line_items_res.data else []
+
+                                pdf_bytes = generate_cam_pdf_report(lease_data, recon, line_items, cam_prov)
+                                property_name = lease_data.get('property_address', 'Property').replace(' ', '_')[:30]
+                                filename = f"CAM_Report_{property_name}_{recon.get('reconciliation_year')}.pdf"
+
                             st.download_button(
                                 label="⬇️ Download PDF",
                                 data=pdf_bytes,
-                                file_name=filename,
+                                file_name=filename or f"CAM_Report_{recon.get('reconciliation_year')}.pdf",
                                 mime="application/pdf",
                                 key=f"dl_pdf_{recon['id']}"
                             )
