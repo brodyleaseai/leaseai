@@ -15,7 +15,7 @@ from typing import List, Dict
 sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
 
 st.set_page_config(
-    page_title="Bulk Upload | LeaseAI",
+    page_title="Bulk Upload | Veriterm",
     page_icon="📦",
     layout="wide",
 )
@@ -24,7 +24,7 @@ st.set_page_config(
 st.markdown("""
 <style>
     .bulk-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%);
         padding: 2rem;
         border-radius: 10px;
         margin-bottom: 2rem;

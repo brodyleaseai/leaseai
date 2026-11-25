@@ -11,6 +11,7 @@ import base64
 from datetime import datetime
 from typing import Optional, Tuple
 from supabase import Client
+import config
 
 
 class TwoFactorAuth:
@@ -34,7 +35,7 @@ class TwoFactorAuth:
         """
         return pyotp.random_base32()
     
-    def generate_qr_code(self, user_email: str, secret: str, issuer: str = "LeaseAI") -> str:
+    def generate_qr_code(self, user_email: str, secret: str, issuer: str = None) -> str:
         """
         Generate QR code for TOTP setup.
         
@@ -48,7 +49,7 @@ class TwoFactorAuth:
         """
         # Create provisioning URI
         totp = pyotp.TOTP(secret)
-        uri = totp.provisioning_uri(name=user_email, issuer_name=issuer)
+        uri = totp.provisioning_uri(name=user_email, issuer_name=issuer or config.APP_NAME)
         
         # Generate QR code
         qr = qrcode.QRCode(version=1, box_size=10, border=5)

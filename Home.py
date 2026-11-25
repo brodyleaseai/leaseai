@@ -17,7 +17,7 @@ except Exception:
 
 # Page config
 st.set_page_config(
-    page_title="LeaseAI | Enterprise Lease Management",
+    page_title="Veriterm | Contract Intelligence",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -35,7 +35,7 @@ except Exception as e:
 st.markdown("""
 <style>
     .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%);
         padding: 3rem 2rem;
         border-radius: 15px;
         margin-bottom: 2rem;
@@ -44,7 +44,7 @@ st.markdown("""
     }
     .feature-card {
         background: #1a1f2e;
-        border: 2px solid #667eea;
+        border: 2px solid #1B3A5C;
         border-radius: 10px;
         padding: 2rem;
         margin-bottom: 1rem;
@@ -61,7 +61,7 @@ st.markdown("""
     }
     .feature-card:hover {
         transform: translateY(-5px);
-        border-color: #764ba2;
+        border-color: #0B1F3A;
     }
     .stat-card {
         background: linear-gradient(135deg, #1a1f2e 0%, #2d3561 100%);
@@ -72,7 +72,7 @@ st.markdown("""
     .stat-value {
         font-size: 2.5rem;
         font-weight: 700;
-        color: #667eea;
+        color: #1B3A5C;
     }
     .stat-label {
         color: #8892b0;
@@ -93,7 +93,7 @@ st.markdown("""
     input[type="text"], input[type="password"], input[type="email"] {
         background-color: #ffffff !important;
         color: #000000 !important;
-        border: 2px solid #667eea !important;
+        border: 2px solid #1B3A5C !important;
         border-radius: 8px !important;
         padding: 0.75rem !important;
         font-size: 1rem !important;
@@ -117,7 +117,7 @@ st.markdown("""
     .stTextInput > div > div > input {
         background-color: #ffffff !important;
         color: #000000 !important;
-        border: 2px solid #667eea !important;
+        border: 2px solid #1B3A5C !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -127,10 +127,10 @@ if not st.session_state.get("authenticated", False):
     # Show login page
     st.markdown("""
     <div class="main-header">
-        <h1>🏢 LeaseAI</h1>
-        <h2>Enterprise Lease Intelligence Platform</h2>
+        <h1>Veriterm</h1>
+        <h2>Contract Intelligence</h2>
         <p style="font-size: 1.1rem; margin-top: 1rem; opacity: 0.9;">
-            AI-powered lease abstraction • Amendment Resolution Graph™ • ASC 842 compliance
+            Clearer terms. Brighter outcomes.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -215,10 +215,10 @@ col_header1, col_header2 = st.columns([4, 1])
 with col_header1:
     st.markdown("""
     <div class="main-header">
-        <h1>🏢 LeaseAI</h1>
-        <h2>Enterprise Lease Intelligence Platform</h2>
+        <h1>Veriterm</h1>
+        <h2>Contract Intelligence</h2>
         <p style="font-size: 1.1rem; margin-top: 1rem; opacity: 0.9;">
-            AI-powered lease abstraction • Amendment Resolution Graph™ • ASC 842 compliance
+            Clearer terms. Brighter outcomes.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -230,7 +230,7 @@ with col_header2:
     
     st.markdown(f"""
     <div style="text-align: right; padding: 1rem; background: #1a1f2e; border-radius: 10px; margin-top: 1rem;">
-        <div style="color: #667eea; font-weight: 600;">{user_name}</div>
+        <div style="color: #1B3A5C; font-weight: 600;">{user_name}</div>
         <div style="color: #8892b0; font-size: 0.85rem;">{user_role}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -313,7 +313,7 @@ with col1:
             Proprietary amendment tracking system. Map amendment chains, track clause-level 
             modifications, and query controlling values at any point in time.
         </p>
-        <p style="color: #667eea; font-weight: 600;">
+        <p style="color: #1B3A5C; font-weight: 600;">
             ✓ Visual amendment timelines<br>
             ✓ Clause version control<br>
             ✓ Query engine for any date<br>
@@ -329,7 +329,7 @@ with col1:
             Automated compliance engine for ASC 842 and IFRS 16 lease accounting standards.
             Generate journal entries, calculate lease liabilities, and maintain audit trails.
         </p>
-        <p style="color: #667eea; font-weight: 600;">
+        <p style="color: #1B3A5C; font-weight: 600;">
             ✓ Automated journal entries<br>
             ✓ Lease liability calculations<br>
             ✓ ROU asset tracking<br>
@@ -346,7 +346,7 @@ with col2:
             Extract 84+ lease fields with industry-leading accuracy. Supports both digital 
             and scanned PDFs with OCR fallback (AWS Textract + Tesseract).
         </p>
-        <p style="color: #667eea; font-weight: 600;">
+        <p style="color: #1B3A5C; font-weight: 600;">
             ✓ 84 comprehensive fields<br>
             ✓ OCR for scanned documents<br>
             ✓ Confidence scoring<br>
@@ -362,7 +362,7 @@ with col2:
             Never miss a renewal, rent escalation, or option deadline. Automated 
             date extraction and multi-interval notifications.
         </p>
-        <p style="color: #667eea; font-weight: 600;">
+        <p style="color: #1B3A5C; font-weight: 600;">
             ✓ Auto-extracted from leases<br>
             ✓ Email notifications<br>
             ✓ Customizable intervals<br>
@@ -477,8 +477,8 @@ except Exception as e:
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("""
 <div style="text-align: center; color: #6b7280; padding: 2rem; border-top: 1px solid #2d3561;">
-    <p><strong>LeaseAI Enterprise Platform</strong></p>
-    <p>Amendment Resolution Graph™ • Proprietary IP • Enterprise-Grade Security</p>
-    <p style="font-size: 0.85rem;">© 2026 LeaseAI • Built in Vancouver, BC</p>
+    <p><strong>Veriterm Contract Intelligence Inc.</strong></p>
+    <p>Lease abstracts • CAM workpapers • ASC 842 • Critical dates</p>
+    <p style="font-size: 0.85rem;">© 2026 Veriterm • Vancouver, BC</p>
 </div>
 """, unsafe_allow_html=True)

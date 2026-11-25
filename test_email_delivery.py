@@ -42,14 +42,14 @@ def send_test_email(recipient_email: str):
         message = Mail(
             from_email=config.SENDGRID_FROM_EMAIL,
             to_emails=recipient_email,
-            subject='🧪 LeaseAI Email Test',
+            subject='🧪 Veriterm Email Test',
             html_content=f"""
             <html>
             <body style="font-family: Arial, sans-serif; padding: 20px;">
-                <h2 style="color: #667eea;">LeaseAI Email Test</h2>
-                <p>This is a test email from your LeaseAI application.</p>
+                <h2 style="color: #1B3A5C;">Veriterm Email Test</h2>
+                <p>This is a test email from your Veriterm application.</p>
                 
-                <div style="background: #f0f4ff; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0;">
+                <div style="background: #f0f4ff; padding: 15px; border-left: 4px solid #1B3A5C; margin: 20px 0;">
                     <strong>✅ SendGrid Configuration Successful!</strong><br>
                     Your email delivery system is working correctly.
                 </div>

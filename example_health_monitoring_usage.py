@@ -83,7 +83,7 @@ def example_full_workflow():
         'username': os.environ.get('SMTP_USERNAME'),
         'password': os.environ.get('SMTP_PASSWORD'),
         'from_email': os.environ.get('SMTP_FROM_EMAIL'),
-        'from_name': 'LeaseAI Portfolio Monitor'
+        'from_name': 'Veriterm Portfolio Monitor'
     }
     
     if all([smtp_config['username'], smtp_config['password'], smtp_config['from_email']]):
@@ -149,7 +149,7 @@ def example_send_critical_alert():
         'username': os.environ.get('SMTP_USERNAME'),
         'password': os.environ.get('SMTP_PASSWORD'),
         'from_email': os.environ.get('SMTP_FROM_EMAIL'),
-        'from_name': 'LeaseAI Alerts'
+        'from_name': 'Veriterm Alerts'
     }
     
     emailer = HealthReportEmailer(sb, smtp_config)

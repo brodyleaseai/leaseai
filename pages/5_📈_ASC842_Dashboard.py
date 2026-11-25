@@ -14,7 +14,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 st.set_page_config(
-    page_title="ASC 842 Compliance - LeaseAI",
+    page_title="ASC 842 Compliance - Veriterm",
     page_icon="📈",
     layout="wide",
 )
@@ -600,4 +600,4 @@ with tab5:
     """)
 
 st.markdown("---")
-st.caption("LeaseAI ASC 842 Compliance Engine | Enterprise-Grade Lease Accounting")
+st.caption("Veriterm ASC 842 Compliance Engine")

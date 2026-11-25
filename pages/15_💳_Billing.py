@@ -15,7 +15,7 @@ import config
 from payment_integration import PaymentHandler, get_client_billing
 from usage_limits import check_can_upload, current_year_month
 
-st.set_page_config(page_title="Billing - LeaseAI", page_icon="💳", layout="wide")
+st.set_page_config(page_title="Billing - Veriterm", page_icon="💳", layout="wide")
 
 if not st.session_state.get("authenticated", False):
     st.warning("Please log in from the Home page first.")

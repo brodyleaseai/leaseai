@@ -44,7 +44,7 @@ class SlackNotifier(BaseIntegration):
         
         self.webhook_url = config.get('webhook_url')
         self.default_channel = config.get('channel')
-        self.username = config.get('username', 'LeaseAI Bot')
+        self.username = config.get('username', 'Veriterm Bot')
         self.icon_emoji = config.get('icon_emoji', ':office:')
     
     def _get_integration_type(self) -> IntegrationType:
@@ -66,7 +66,7 @@ class SlackNotifier(BaseIntegration):
             self.ensure_authenticated()
             
             result = self.send_notification(
-                title="LeaseAI Connection Test",
+                title="Veriterm Connection Test",
                 message="Successfully connected to Slack! 🎉",
                 color="good"
             )
@@ -119,7 +119,7 @@ class SlackNotifier(BaseIntegration):
                     'color': color,
                     'title': title,
                     'text': message,
-                    'footer': 'LeaseAI',
+                    'footer': 'Veriterm',
                     'footer_icon': 'https://platform.slack-edge.com/img/default_application_icon.png',
                     'ts': int(datetime.now().timestamp())
                 }]
@@ -326,7 +326,7 @@ class TeamsNotifier(BaseIntegration):
             self.ensure_authenticated()
             
             result = self.send_notification(
-                title="LeaseAI Connection Test",
+                title="Veriterm Connection Test",
                 message="Successfully connected to Microsoft Teams!",
                 theme_color="00FF00"
             )
@@ -377,7 +377,7 @@ class TeamsNotifier(BaseIntegration):
                 "themeColor": theme_color,
                 "title": title,
                 "sections": [{
-                    "activityTitle": "LeaseAI",
+                    "activityTitle": "Veriterm",
                     "activitySubtitle": format_date(datetime.now()),
                     "text": message
                 }]

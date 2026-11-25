@@ -15,8 +15,8 @@ class EmailTemplates:
                 <h2>Your Lease Abstract is Ready!</h2>
                 <p>The lease abstract for <strong>{property_address}</strong> has been completed.</p>
                 <p>Lease ID: {lease_id}</p>
-                <p>Log in to your LeaseAI portal to download your abstract.</p>
-                <p>Best regards,<br>The LeaseAI Team</p>
+                <p>Log in to your {config.APP_NAME} portal to download your abstract.</p>
+                <p>Best regards,<br>The {config.APP_NAME} Team</p>
             </body>
             </html>
             '''

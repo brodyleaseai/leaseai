@@ -9,6 +9,7 @@ import io
 from datetime import datetime
 from typing import Dict, List, Optional
 import zipfile
+import config
 
 
 class GenericCSVExporter:
@@ -33,7 +34,7 @@ class GenericCSVExporter:
         writer = csv.writer(output)
         
         # Header row with metadata
-        writer.writerow(['LeaseAI - Lease Abstract Export'])
+        writer.writerow([f'{config.APP_NAME} - Lease Abstract Export'])
         writer.writerow(['Generated:', datetime.now().strftime('%Y-%m-%d %I:%M %p')])
         writer.writerow(['Lease ID:', lease_data.get('id', '')])
         writer.writerow(['Property:', lease_data.get('property_address', 'N/A')])
@@ -144,7 +145,7 @@ class GenericExcelExporter:
         ws.column_dimensions['B'].width = 50
         
         # Title
-        ws['A1'] = 'LeaseAI - Lease Abstract'
+        ws['A1'] = f'{config.APP_NAME} - Lease Abstract'
         ws['A1'].font = Font(size=18, bold=True, color='1a1f2e')
         ws['A1'].fill = PatternFill(start_color='64b5f6', end_color='64b5f6', fill_type='solid')
         ws.merge_cells('A1:B1')
@@ -260,7 +261,7 @@ class GenericExcelExporter:
             ws['A5'] = 'To generate ASC 842 calculations:'
             ws['A5'].font = Font(bold=True)
             
-            ws['A6'] = '1. Go to ASC 842 Dashboard in LeaseAI'
+            ws['A6'] = f'1. Go to ASC 842 Dashboard in {config.APP_NAME}'
             ws['A7'] = '2. Select this lease and run calculations'
             ws['A8'] = '3. Re-export to Excel to include the results'
             

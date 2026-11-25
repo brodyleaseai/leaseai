@@ -4,6 +4,7 @@ Handles user authentication and role-based access control.
 """
 import streamlit as st
 from supabase import Client
+import config
 
 
 class AuthManager:
@@ -168,7 +169,7 @@ class AuthManager:
     
     def render_login_page(self):
         """Render the login form."""
-        st.title(f"🔐 {st.session_state.get('app_name', 'LeaseAI')} Login")
+        st.title(f"🔐 {st.session_state.get('app_name', config.APP_NAME)} Login")
         st.markdown("---")
         
         # Check if we need 2FA code

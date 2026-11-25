@@ -498,7 +498,7 @@ def render_client_lease_card_enhanced(lease, supabase):
     elif status == "FLAGGED":
         st.warning("⚠️ This lease requires additional attention. Our support team will contact you shortly.")
         if st.button("📧 Contact Support", key=f"support_{lease_id}"):
-            st.info("Please email support@leaseai.com or call (604) 555-0123")
+            st.info("Please email hello@veriterm.com or call (604) 555-0123")
 
 
 def download_abstract(lease):
@@ -595,7 +595,7 @@ def render_billing_page(supabase, auth):
     """Render billing and subscription information."""
     
     st.header("💰 Billing & Subscription")
-    st.markdown("Manage your LeaseAI subscription and billing information.")
+    st.markdown("Manage your Veriterm subscription and billing information.")
     
     # This will be implemented in Priority 3 with Stripe
     st.info("💳 **Payment integration coming in Priority 3**")
@@ -638,7 +638,7 @@ def render_help_page():
     st.header("❓ Help & Support")
     
     st.markdown("""
-    ### How LeaseAI Works
+    ### How Veriterm Works
     
     **1. Upload Your Lease** 📤
     - Submit your commercial lease document in PDF format
@@ -684,17 +684,17 @@ def render_help_page():
     
     Need help? We're here for you!
     
-    📧 **Email:** support@leaseai.com  
+    📧 **Email:** hello@veriterm.com  
     📞 **Phone:** (604) 555-0123  
     🕐 **Hours:** Monday-Friday, 9 AM - 5 PM PT  
     💬 **Live Chat:** Available in-app (coming soon)
     
     ### Additional Resources
     
-    - 📖 [User Guide](https://leaseai.com/docs)
-    - 🎥 [Video Tutorials](https://leaseai.com/tutorials)
-    - 💡 [Best Practices](https://leaseai.com/best-practices)
-    - 🔒 [Security & Privacy](https://leaseai.com/security)
+    - 📖 [User Guide](https://veriterm.com/docs)
+    - 🎥 [Video Tutorials](https://veriterm.com/tutorials)
+    - 💡 [Best Practices](https://veriterm.com/best-practices)
+    - 🔒 [Security & Privacy](https://veriterm.com/security)
     """)
     
     st.markdown("---")

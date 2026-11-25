@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 st.set_page_config(
-    page_title="Critical Dates - LeaseAI",
+    page_title="Critical Dates - Veriterm",
     page_icon="📅",
     layout="wide",
 )
@@ -191,7 +191,7 @@ with tab3:
     st.markdown("""
     ### Automatic Email Notifications
     
-    LeaseAI can automatically send email notifications for upcoming critical dates.
+    Veriterm can automatically send email notifications for upcoming critical dates.
     
     **Default Notification Schedule:**
     - 90 days before

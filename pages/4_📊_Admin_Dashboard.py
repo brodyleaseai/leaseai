@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 st.set_page_config(
-    page_title="Admin Dashboard - LeaseAI",
+    page_title="Admin Dashboard - Veriterm",
     page_icon="📊",
     layout="wide",
 )
@@ -50,7 +50,7 @@ if st.session_state.get("user_role") != "admin":
 # Header
 col1, col2 = st.columns([3, 1])
 with col1:
-    st.title("📊 LeaseAI Admin Dashboard")
+    st.title("📊 Veriterm Admin Dashboard")
 with col2:
     st.write(f"👤 {st.session_state.get('user_name', 'Admin')}")
     if st.button("Logout", use_container_width=True):

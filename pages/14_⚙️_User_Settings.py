@@ -16,7 +16,7 @@ from two_factor_auth import render_2fa_setup_page, TwoFactorAuth
 
 # Page config
 st.set_page_config(
-    page_title="User Settings - LeaseAI",
+    page_title="User Settings - Veriterm",
     page_icon="⚙️",
     layout="wide"
 )
@@ -164,4 +164,4 @@ with tab3:
 
 # Footer
 st.markdown("---")
-st.caption("LeaseAI User Settings • For support, contact support@leaseai.com")
+st.caption("Veriterm User Settings • For support, contact hello@veriterm.com")

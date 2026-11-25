@@ -24,7 +24,7 @@ import json
 
 # Page config
 st.set_page_config(
-    page_title="Integrations - LeaseAI",
+    page_title="Integrations - Veriterm",
     page_icon="🔌",
     layout="wide"
 )
@@ -345,7 +345,7 @@ with tab4:
             
             slack_username = st.text_input(
                 "Bot Username",
-                value="LeaseAI Bot",
+                value="Veriterm Bot",
                 key="slack_username"
             )
             

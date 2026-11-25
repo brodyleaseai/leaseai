@@ -28,7 +28,7 @@ from reportlab.platypus import (
 import config
 from cam_engine import analyze_line_items
 
-NAVY = colors.HexColor("#1a237e")
+NAVY = colors.HexColor("#0B1F3A")
 NAVY_TEXT = colors.HexColor("#1f4788")
 LIGHT_NAVY = colors.HexColor("#e8eaf6")
 GREEN_BG = colors.HexColor("#e8f5e9")
@@ -317,7 +317,7 @@ class CAMReconciliationPDFReport:
         canvas_obj.rect(0, letter[1] - 0.48 * inch, letter[0], 0.48 * inch, fill=1, stroke=0)
         canvas_obj.setFillColor(colors.white)
         canvas_obj.setFont("Helvetica-Bold", 10)
-        canvas_obj.drawString(0.65 * inch, letter[1] - 0.30 * inch, config.APP_NAME)
+        canvas_obj.drawString(0.65 * inch, letter[1] - 0.30 * inch, config.APP_NAME.upper())
         canvas_obj.setFont("Helvetica", 8)
         canvas_obj.drawRightString(
             letter[0] - 0.65 * inch,
@@ -602,7 +602,7 @@ class CAMReconciliationPDFReport:
     def _create_calculation_section(self, reconciliation: Dict, cam_provisions: Dict) -> List:
         elements = [Paragraph("HOW THE TENANT SHARE WAS CALCULATED", self.styles["SectionHead"])]
         elements.append(Paragraph(
-            "LeaseAI applies the lease in this order: drop excluded building costs, multiply "
+            f"{config.APP_NAME} applies the lease in this order: drop excluded building costs, multiply "
             "the remainder by the tenant's share of the building, then apply any CAM stop or "
             "yearly increase cap. A yearly cap is measured against the base-year tenant CAM "
             "amount, never against this year's billed share.",
@@ -776,7 +776,7 @@ class CAMReconciliationPDFReport:
         elements = [
             Paragraph("LEASE TERMS APPLIED", self.styles["SectionHead"]),
             Paragraph(
-                "These are the CAM terms LeaseAI used. Blank fields were not stored on the "
+                f"These are the CAM terms {config.APP_NAME} used. Blank fields were not stored on the "
                 "lease abstract; the workpaper does not invent them, except deriving share "
                 "from RSF when the percentage was missing.",
                 self.styles["BodyNormal"],

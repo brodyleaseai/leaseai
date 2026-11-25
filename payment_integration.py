@@ -99,7 +99,7 @@ class PaymentHandler:
                     "price_data": {
                         "currency": plan["currency"],
                         "product_data": {
-                            "name": f"LeaseAI {plan['name']}",
+                            "name": f"{config.APP_NAME} {plan['name']}",
                             "description": plan["description"],
                             "tax_code": SAAS_TAX_CODE,
                         },
@@ -152,7 +152,7 @@ class PaymentHandler:
             currency=plan["currency"],
             unit_amount=amount,
             recurring={"interval": interval},
-            product_data={"name": f"LeaseAI {plan['name']}", "tax_code": SAAS_TAX_CODE},
+            product_data={"name": f"{config.APP_NAME} {plan['name']}", "tax_code": SAAS_TAX_CODE},
         )
 
         updated = stripe.Subscription.modify(
