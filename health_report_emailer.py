@@ -42,7 +42,7 @@ class HealthReportEmailer:
         self.smtp_user = smtp_config.get('username')
         self.smtp_password = smtp_config.get('password')
         self.from_email = smtp_config.get('from_email')
-        self.from_name = smtp_config.get('from_name', 'LeaseAI Portfolio Monitor')
+        self.from_name = smtp_config.get('from_name', 'Veriterm Portfolio Monitor')
     
     def send_weekly_health_report(self, report_id: str, recipient_email: str, recipient_name: str = None, pdf_path: str = None) -> bool:
         """
@@ -295,20 +295,20 @@ class HealthReportEmailer:
             <style>
                 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; color: #333; }}
                 .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 8px 8px 0 0; text-align: center; }}
+                .header {{ background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%); color: white; padding: 30px; border-radius: 8px 8px 0 0; text-align: center; }}
                 .content {{ background: white; padding: 30px; border: 1px solid #e0e0e0; border-top: none; }}
                 .score-box {{ text-align: center; margin: 20px 0; padding: 20px; background: #f5f5f5; border-radius: 8px; }}
                 .score {{ font-size: 48px; font-weight: bold; color: {health_color}; }}
                 .status {{ font-size: 20px; font-weight: 600; color: {health_color}; }}
                 .metrics {{ display: table; width: 100%; margin: 20px 0; }}
                 .metric {{ display: table-cell; text-align: center; padding: 15px; }}
-                .metric-value {{ font-size: 24px; font-weight: bold; color: #667eea; }}
+                .metric-value {{ font-size: 24px; font-weight: bold; color: #1B3A5C; }}
                 .metric-label {{ font-size: 12px; color: #666; text-transform: uppercase; }}
                 .section {{ margin: 25px 0; }}
                 .section-title {{ font-size: 18px; font-weight: 600; margin-bottom: 10px; color: #333; }}
                 .footer {{ text-align: center; padding: 20px; color: #999; font-size: 12px; }}
-                a {{ color: #667eea; text-decoration: none; }}
-                .button {{ display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; margin: 10px 0; }}
+                a {{ color: #1B3A5C; text-decoration: none; }}
+                .button {{ display: inline-block; padding: 12px 24px; background: #1B3A5C; color: white; text-decoration: none; border-radius: 4px; margin: 10px 0; }}
             </style>
         </head>
         <body>
@@ -371,7 +371,7 @@ class HealthReportEmailer:
                 </div>
                 
                 <div class="footer">
-                    <p>This is an automated report from LeaseAI Portfolio Monitor</p>
+                    <p>This is an automated report from Veriterm Portfolio Monitor</p>
                     <p><a href="#">Unsubscribe</a> | <a href="#">Manage Preferences</a></p>
                 </div>
             </div>
@@ -466,7 +466,7 @@ class HealthReportEmailer:
                 </div>
                 
                 <div class="footer">
-                    <p>This is an automated alert from LeaseAI Portfolio Monitor</p>
+                    <p>This is an automated alert from Veriterm Portfolio Monitor</p>
                 </div>
             </div>
         </body>
@@ -532,7 +532,7 @@ class HealthReportEmailer:
                 </div>
                 
                 <div class="footer">
-                    <p>This is an automated reminder from LeaseAI Portfolio Monitor</p>
+                    <p>This is an automated reminder from Veriterm Portfolio Monitor</p>
                 </div>
             </div>
         </body>

@@ -1,5 +1,5 @@
 """
-LeaseAI Configuration
+Veriterm configuration
 Centralized configuration for environment variables and API keys.
 
 SECURITY: Never commit real API keys to git or share them in chat!
@@ -28,8 +28,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-openai-key-here")
 # SendGrid Configuration
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "your-sendgrid-key-here")
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "brody@kitschco.com")
-SENDER_EMAIL = "brody@kitschco.com"  # Deprecated, use SENDGRID_FROM_EMAIL
-SENDER_NAME = "Brody - LeaseAI"
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", SENDGRID_FROM_EMAIL)
+SENDER_NAME = os.getenv("SENDER_NAME", "Veriterm")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "hello@veriterm.com")
 
 # Stripe Configuration
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_your-stripe-key-here")
@@ -37,10 +38,11 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_test_your-strip
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_your-webhook-secret-here")
 
 # Application Configuration
-APP_NAME = "LeaseAI"
-COMPANY_NAME = "KitschCo"
+APP_NAME = "Veriterm"
+COMPANY_NAME = "Veriterm Contract Intelligence Inc."
+COMPANY_TAGLINE = "Clearer terms. Brighter outcomes."
 COMPANY_LOCATION = "Vancouver, BC"
-APP_URL = os.getenv("APP_URL", "https://leaseai.streamlit.app")  # Update with your actual deployed URL
+APP_URL = os.getenv("APP_URL", "https://leaseai.streamlit.app")
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 EXTRACTION_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "300"))

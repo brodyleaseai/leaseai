@@ -13,7 +13,7 @@ from cam_engine import (
 
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="LeaseAI CAM Reconciliation",
+    page_title="Veriterm CAM Reconciliation",
     page_icon="💵",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1297,4 +1297,4 @@ with tab3:
 
 
 st.markdown("---")
-st.markdown('<span style="font-size:0.75rem; color:#555;">LeaseAI CAM Reconciliation v1.0 — Phase 2A</span>', unsafe_allow_html=True)
+st.markdown('<span style="font-size:0.75rem; color:#555;">Veriterm CAM Reconciliation</span>', unsafe_allow_html=True)

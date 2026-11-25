@@ -233,7 +233,7 @@ def display_calculation_results(results):
             y=liability_df['closing_balance'],
             mode='lines',
             name='Lease Liability',
-            line=dict(color='#1976D2', width=3)
+            line=dict(color='#0B1F3A', width=3)
         ))
         fig.update_layout(
             title="Lease Liability Over Time",
@@ -502,7 +502,7 @@ def render_guidance_tab():
     
     st.markdown("---")
     
-    st.subheader("💡 LeaseAI Best Practices")
+    st.subheader("💡 Veriterm Best Practices")
     
     st.markdown("""
     1. **Document assumptions thoroughly** - especially discount rate and lease term judgments

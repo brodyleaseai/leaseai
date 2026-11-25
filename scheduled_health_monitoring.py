@@ -364,7 +364,7 @@ def main():
         'username': os.environ.get('SMTP_USERNAME'),
         'password': os.environ.get('SMTP_PASSWORD'),
         'from_email': os.environ.get('SMTP_FROM_EMAIL'),
-        'from_name': os.environ.get('SMTP_FROM_NAME', 'LeaseAI Portfolio Monitor')
+        'from_name': os.environ.get('SMTP_FROM_NAME', 'Veriterm Portfolio Monitor')
     }
     
     # Validate configuration

@@ -15,6 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 import config
+from brand import LOGO_PATH
 
 
 def _make_colored_box(box_color: str):
@@ -84,8 +85,9 @@ def _header_footer(canvas_obj, doc):
     canvas_obj.saveState()
     
     # Header
+    canvas_obj.setFillColor(colors.HexColor("#0B1F3A"))
     canvas_obj.setFont('Helvetica-Bold', 10)
-    canvas_obj.drawString(0.75 * inch, letter[1] - 0.5 * inch, config.APP_NAME)
+    canvas_obj.drawString(0.75 * inch, letter[1] - 0.5 * inch, config.APP_NAME.upper())
     canvas_obj.setFont('Helvetica', 8)
     canvas_obj.drawRightString(
         letter[0] - 0.75 * inch,
@@ -133,7 +135,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         'CustomTitle',
         parent=styles['Heading1'],
         fontSize=24,
-        textColor=colors.HexColor("#1976D2"),
+        textColor=colors.HexColor("#0B1F3A"),
         spaceAfter=12,
         alignment=TA_CENTER
     )
@@ -142,15 +144,29 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
         'CustomHeading',
         parent=styles['Heading2'],
         fontSize=14,
-        textColor=colors.HexColor("#1976D2"),
+        textColor=colors.HexColor("#0B1F3A"),
         spaceAfter=8,
         spaceBefore=12
     )
+    tagline_style = ParagraphStyle(
+        'BrandTagline',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.HexColor("#8A9AAB"),
+        alignment=TA_CENTER,
+        spaceAfter=16,
+    )
     
     # Title Page
-    story.append(Spacer(1, 1.5 * inch))
+    story.append(Spacer(1, 0.6 * inch))
+    if LOGO_PATH.is_file():
+        logo = Image(str(LOGO_PATH), width=2.1 * inch, height=1.3 * inch)
+        logo.hAlign = "CENTER"
+        story.append(logo)
+        story.append(Spacer(1, 0.2 * inch))
     story.append(Paragraph(f"{config.APP_NAME} Lease Abstract", title_style))
-    story.append(Spacer(1, 0.25 * inch))
+    story.append(Paragraph(config.COMPANY_TAGLINE, tagline_style))
+    story.append(Spacer(1, 0.15 * inch))
     
     # Property Information Box
     property_info = [
@@ -237,7 +253,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     summary_table = Table(summary_data, colWidths=[6.0*inch])
     summary_table.setStyle(TableStyle([
         # Header row - white text to match main table
-        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#1976D2")),
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#0B1F3A")),
         ("TEXTCOLOR", (0, 0), (0, 0), colors.whitesmoke),  # White text
         ("ALIGN", (0, 0), (0, 0), "CENTER"),
         ("FONTSIZE", (0, 0), (0, 0), 11),
@@ -351,7 +367,7 @@ def generate_lease_abstract_pdf(lease_data: dict, extracted_fields: dict) -> byt
     )
     fields_table.setStyle(TableStyle([
         # Header row
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1976D2")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B1F3A")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),

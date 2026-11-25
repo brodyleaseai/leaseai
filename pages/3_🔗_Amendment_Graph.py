@@ -15,7 +15,7 @@ sb = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
 
 # Page config
 st.set_page_config(
-    page_title="Amendment Resolution Graph™ | LeaseAI",
+    page_title="Amendment Resolution Graph™ | Veriterm",
     page_icon="🔗",
     layout="wide",
 )
@@ -24,7 +24,7 @@ st.set_page_config(
 st.markdown("""
 <style>
     .amendment-graph-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%);
         padding: 2rem;
         border-radius: 10px;
         margin-bottom: 2rem;
@@ -32,13 +32,13 @@ st.markdown("""
     }
     .amendment-card {
         background: #1a1f2e;
-        border: 2px solid #667eea;
+        border: 2px solid #1B3A5C;
         border-radius: 10px;
         padding: 1.5rem;
         margin-bottom: 1rem;
     }
     .clause-timeline {
-        border-left: 3px solid #667eea;
+        border-left: 3px solid #1B3A5C;
         padding-left: 1.5rem;
         margin-left: 1rem;
     }
@@ -51,12 +51,12 @@ st.markdown("""
         left: -1.85rem;
         width: 1rem;
         height: 1rem;
-        background: #667eea;
+        background: #1B3A5C;
         border-radius: 50%;
         border: 3px solid #1a1f2e;
     }
     .version-badge {
-        background: #667eea;
+        background: #1B3A5C;
         color: white;
         padding: 0.25rem 0.75rem;
         border-radius: 20px;
@@ -439,6 +439,6 @@ st.markdown("""
 <div style="text-align: center; color: #6b7280; padding: 2rem;">
     <p><strong>Amendment Resolution Graph™</strong></p>
     <p>Proprietary IP asset • Patent-pending architecture • Enterprise-grade clause tracking</p>
-    <p style="font-size: 0.85rem;">© 2026 LeaseAI • Built in Vancouver, BC</p>
+    <p style="font-size: 0.85rem;">© 2026 Veriterm • Vancouver, BC</p>
 </div>
 """, unsafe_allow_html=True)

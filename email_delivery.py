@@ -7,6 +7,7 @@ from typing import Optional
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 import config
+from brand import email_header_html
 from lease_report import generate_lease_abstract_pdf
 
 
@@ -35,24 +36,21 @@ def send_upload_confirmation_email(
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                <h1 style="margin: 0;">📄 {config.APP_NAME}</h1>
-                <h2 style="margin: 10px 0 0 0; font-weight: normal;">Upload Confirmed!</h2>
-            </div>
+            {email_header_html("Upload Confirmed")}
             
             <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
                 <p>Hi {recipient_name},</p>
                 
                 <p>We've successfully received your commercial lease document and our AI is now extracting the key terms.</p>
                 
-                <div style="background: #E3F2FD; padding: 15px; border-left: 4px solid #1976D2; margin: 20px 0;">
+                <div style="background: #E3F2FD; padding: 15px; border-left: 4px solid #0B1F3A; margin: 20px 0;">
                     <strong>Property:</strong> {property_address}<br>
                     <strong>Lease ID:</strong> #{lease_id}<br>
                     <strong>Status:</strong> Processing
                 </div>
                 
                 <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="margin-top: 0; color: #667eea;">⏱️ What Happens Next?</h3>
+                    <h3 style="margin-top: 0; color: #0B1F3A;">What happens next</h3>
                     <ol style="margin: 0; padding-left: 20px;">
                         <li><strong>AI Extraction (Minutes):</strong> GPT-4 extracts 84+ lease terms automatically</li>
                         <li><strong>Expert Review (24 hours):</strong> Our team verifies accuracy and confidence scores</li>
@@ -62,7 +60,7 @@ def send_upload_confirmation_email(
                 </div>
                 
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="{config.APP_URL}" style="display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    <a href="{config.APP_URL}" style="display: inline-block; background: #1B3A5C; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
                         View Progress in Portal
                     </a>
                 </div>
@@ -177,13 +175,15 @@ def send_lease_abstract_email(
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #1976D2;">Your Lease Abstract is Ready</h2>
+            {email_header_html("Your lease abstract is ready")}
+            <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <h2 style="display:none; color: #0B1F3A;">Your Lease Abstract is Ready</h2>
             
             <p>Dear {recipient_name},</p>
             
             <p>Your commercial lease abstract has been completed and is attached to this email.</p>
             
-            <div style="background-color: #E3F2FD; padding: 15px; border-left: 4px solid #1976D2; margin: 20px 0;">
+            <div style="background-color: #E3F2FD; padding: 15px; border-left: 4px solid #0B1F3A; margin: 20px 0;">
                 <strong>Property:</strong> {property_address}<br>
                 <strong>Tenant:</strong> {tenant_name}<br>
                 <strong>Lease ID:</strong> #{lease_id}
@@ -203,6 +203,7 @@ def send_lease_abstract_email(
                 This is an automated message from {config.APP_NAME}. 
                 Please do not reply directly to this email.
             </p>
+            </div>
         </div>
     </body>
     </html>
@@ -291,17 +292,18 @@ def send_cam_report_email(
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #1a237e;">Your CAM Reconciliation Workpaper is Ready</h2>
+            {email_header_html("Your CAM reconciliation workpaper is ready")}
+            <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
 
             <p>Dear {recipient_name},</p>
 
             <p>
-                LeaseAI compared the landlord's {year_label} year-end CAM / operating expense
+                {config.APP_NAME} compared the landlord's {year_label} year-end CAM / operating expense
                 statement to the CAM terms in the lease. The attached PDF is the tenant-side
                 workpaper for your file, your accountant, or a dispute letter to the landlord.
             </p>
 
-            <div style="background-color: #E8EAF6; padding: 15px; border-left: 4px solid #1a237e; margin: 20px 0;">
+            <div style="background-color: #E8EEF4; padding: 15px; border-left: 4px solid #0B1F3A; margin: 20px 0;">
                 <strong>Property:</strong> {property_address}<br>
                 <strong>Tenant:</strong> {tenant_name}<br>
                 <strong>Year:</strong> {year_label}<br>
@@ -326,6 +328,7 @@ def send_cam_report_email(
                 This is an automated message from {config.APP_NAME}.
                 Please do not reply directly to this email.
             </p>
+            </div>
         </div>
     </body>
     </html>
@@ -336,7 +339,7 @@ def send_cam_report_email(
 
     Dear {recipient_name},
 
-    LeaseAI compared the landlord's {year_label} year-end CAM / operating expense
+    {config.APP_NAME} compared the landlord's {year_label} year-end CAM / operating expense
     statement to the CAM terms in the lease. The attached PDF is the tenant-side
     workpaper for your file, your accountant, or a dispute letter to the landlord.
 
@@ -480,7 +483,7 @@ def send_critical_date_reminder(
                 </ul>
                 
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="{config.APP_URL}" style="display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    <a href="{config.APP_URL}" style="display: inline-block; background: #1B3A5C; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
                         View Lease Details
                     </a>
                 </div>

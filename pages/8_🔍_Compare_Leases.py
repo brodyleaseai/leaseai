@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 st.set_page_config(
-    page_title="Compare Leases | LeaseAI",
+    page_title="Compare Leases | Veriterm",
     page_icon="🔍",
     layout="wide",
 )
@@ -35,7 +35,7 @@ sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 st.markdown("""
 <style>
     .comparison-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%);
         padding: 2rem;
         border-radius: 10px;
         margin-bottom: 2rem;

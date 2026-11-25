@@ -5,7 +5,7 @@ from datetime import datetime
 
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="LeaseAI Review",
+    page_title="Veriterm Review",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -32,7 +32,7 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #0f1117; }
     [data-testid="stSidebar"] * { color: #e0e0e0 !important; }
     .leaseai-header {
-        background: linear-gradient(90deg, #1a1f2e 0%, #2d3561 100%);
+        background: linear-gradient(90deg, #0B1F3A 0%, #1B3A5C 100%);
         border-radius: 10px;
         padding: 18px 28px;
         margin-bottom: 24px;
@@ -131,7 +131,7 @@ def update_lease_status(lease_id, status):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    st.markdown("## 🏢 LeaseAI")
+    st.markdown("## Veriterm")
     st.markdown("---")
     
     # Default to the review page if coming from upload
@@ -150,7 +150,7 @@ with st.sidebar:
         del st.session_state["review_page"]
     
     st.markdown("---")
-    st.markdown('<span style="font-size:0.75rem; color:#555;">LeaseAI v1.0 — Phase 4</span>', unsafe_allow_html=True)
+    st.markdown('<span style="font-size:0.75rem; color:#555;">Veriterm</span>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -161,7 +161,7 @@ if page == "📋 Lease Dashboard":
     st.markdown("""
     <div class="leaseai-header">
         <div>
-            <h1>🏢 LeaseAI — Lease Dashboard</h1>
+            <h1>Veriterm — Lease Dashboard</h1>
             <span>All processed leases and their extraction status</span>
         </div>
     </div>

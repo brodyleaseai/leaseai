@@ -50,10 +50,10 @@ class EmailNotificationService:
                 <style>
                     body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                     .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                    .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    .header {{ background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%); 
                               color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }}
                     .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }}
-                    .button {{ display: inline-block; background: #667eea; color: white; 
+                    .button {{ display: inline-block; background: #1B3A5C; color: white; 
                               padding: 12px 30px; text-decoration: none; border-radius: 6px; 
                               font-weight: bold; margin: 20px 0; }}
                     .info-box {{ background: white; padding: 20px; border-radius: 6px; 
@@ -75,7 +75,7 @@ class EmailNotificationService:
                         <p>Great news! We've completed processing your commercial lease and your abstract is ready for download.</p>
                         
                         <div class="info-box">
-                            <h3 style="margin-top: 0; color: #667eea;">📋 Lease Details</h3>
+                            <h3 style="margin-top: 0; color: #1B3A5C;">📋 Lease Details</h3>
                             <p><strong>Property:</strong> {property_address}</p>
                             <p><strong>Tenant:</strong> {tenant_name}</p>
                             <p><strong>Lease ID:</strong> #{lease_id}</p>
@@ -98,14 +98,14 @@ class EmailNotificationService:
                         
                         <p style="margin-top: 30px;">
                             <strong>Next Steps:</strong><br>
-                            1. Log in to your LeaseAI portal<br>
+                            1. Log in to your {config.APP_NAME} portal<br>
                             2. Navigate to "My Leases"<br>
                             3. Click "Download Abstract" next to this lease
                         </p>
                         
                         <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
                             Need help or have questions? Reply to this email or contact our support team at 
-                            <a href="mailto:support@leaseai.com">support@leaseai.com</a>
+                            <a href="mailto:{config.SUPPORT_EMAIL}">{config.SUPPORT_EMAIL}</a>
                         </p>
                     </div>
                     
@@ -130,7 +130,7 @@ class EmailNotificationService:
             
             Log in to {config.APP_URL} and navigate to "My Leases" to download your abstract.
             
-            Questions? Contact us at support@leaseai.com
+            Questions? Contact us at {config.SUPPORT_EMAIL}
             
             - The {config.APP_NAME} Team
             """
@@ -221,7 +221,7 @@ class EmailNotificationService:
                         
                         <p style="margin-top: 30px; color: #6b7280;">
                             We'll send you another email as soon as your abstract is ready. 
-                            If you have any questions, contact us at support@leaseai.com
+                            If you have any questions, contact us at {config.SUPPORT_EMAIL}
                         </p>
                     </div>
                 </div>
@@ -258,10 +258,10 @@ class EmailNotificationService:
                 <style>
                     body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                     .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                    .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    .header {{ background: linear-gradient(135deg, #0B1F3A 0%, #1B3A5C 100%); 
                               color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }}
                     .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }}
-                    .button {{ display: inline-block; background: #667eea; color: white; 
+                    .button {{ display: inline-block; background: #1B3A5C; color: white; 
                               padding: 12px 30px; text-decoration: none; border-radius: 6px; 
                               font-weight: bold; margin: 20px 0; }}
                 </style>
@@ -293,7 +293,7 @@ class EmailNotificationService:
                         
                         <p style="margin-top: 30px;">
                             Need help? Check out our <a href="{config.APP_URL}/docs">User Guide</a> or 
-                            contact us at support@leaseai.com
+                            contact us at {config.SUPPORT_EMAIL}
                         </p>
                     </div>
                 </div>

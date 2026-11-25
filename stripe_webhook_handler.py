@@ -208,7 +208,7 @@ def _send_receipt_email(sb, client_id: Optional[str], invoice: Dict[str, Any]):
     url = invoice.get("hosted_invoice_url") or ""
     _send_email(
         email,
-        "LeaseAI payment receipt",
+        f"{config.APP_NAME} payment receipt",
         f"<p>We received your payment of ${amount:,.2f}.</p>"
         f"<p><a href='{url}'>View invoice</a></p>",
     )
@@ -227,7 +227,7 @@ def _send_dunning_email(client: Optional[Dict[str, Any]], failures: int, status:
             f"<p>Payment attempt {failures} failed. "
             "Please update your card on the Billing page to avoid interruption.</p>"
         )
-    _send_email(client["email"], "LeaseAI payment failed", body)
+    _send_email(client["email"], f"{config.APP_NAME} payment failed", body)
 
 
 def _send_email(to_email: str, subject: str, html: str):

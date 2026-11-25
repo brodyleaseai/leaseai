@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 st.set_page_config(
-    page_title="Client Portal - LeaseAI",
+    page_title="Client Portal - Veriterm",
     page_icon="👥",
     layout="wide",
 )
@@ -51,7 +51,7 @@ if user_role not in ["client", "admin"]:
 # Header
 col1, col2 = st.columns([3, 1])
 with col1:
-    st.title("👥 LeaseAI Client Portal")
+    st.title("👥 Veriterm Client Portal")
     st.caption("Upload leases, track processing, and download abstracts")
 with col2:
     st.write(f"👤 {st.session_state.get('user_name', 'Client')}")
@@ -216,7 +216,7 @@ with col2:
 st.markdown("---")
 st.subheader("❓ Help & Support")
 
-with st.expander("📖 How to Use LeaseAI"):
+with st.expander("📖 How to Use Veriterm"):
     st.markdown("""
     ### Getting Started
     
@@ -227,7 +227,7 @@ with st.expander("📖 How to Use LeaseAI"):
     
     ### What We Extract
     
-    LeaseAI automatically extracts 84+ fields including:
+    Veriterm automatically extracts 84+ fields including:
     - Tenant and landlord information
     - Lease dates and terms
     - Rent and payment details
@@ -237,7 +237,7 @@ with st.expander("📖 How to Use LeaseAI"):
     
     ### Need Help?
     
-    Contact our support team at support@leaseai.com
+    Contact our support team at hello@veriterm.com
     """)
 
 with st.expander("💰 Billing Information"):
